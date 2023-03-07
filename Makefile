@@ -13,7 +13,7 @@ endif
 # BOARD
 BOARD := qemu
 SBI ?= rustsbi
-BOOTLOADER := ../bootloader/$(SBI)-$(BOARD).bin
+BOOTLOADER := bootloader/$(SBI)-$(BOARD).bin
 
 # KERNEL ENTRY
 KERNEL_ENTRY_PA := 0x80200000
