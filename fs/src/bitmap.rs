@@ -1,19 +1,21 @@
 use super::{get_block_cache, BlockDevice, BLOCK_SZ};
 use alloc::sync::Arc;
 
+// BitmapBlock 是一个磁盘数据结构，它将位图区域中的一个磁盘块解释为长度为 64 的一个 u64 数组， 每个 u64 打包了一组 64 bits
 type BitmapBlock = [u64; 64];
 
 const BLOCK_BITS: usize = BLOCK_SZ * 8;
 
+/// 位图 Bitmap 中仅保存了它所在区域的起始块编号以及区域的长度为多少个块
 pub struct Bitmap {
     start_block_id: usize,
-    blocks: usize,
+    blocks: usize, //块数
 }
 
 /// Return (block_pos, bits64_pos, inner_pos)
 fn decomposition(mut bit: usize) -> (usize, usize, usize) {
     let block_pos = bit / BLOCK_BITS;
-    bit %= BLOCK_BITS;
+    bit = bit % BLOCK_BITS;
     (block_pos, bit / 64, bit % 64)
 }
 
@@ -36,8 +38,10 @@ impl Bitmap {
                 if let Some((bits64_pos, inner_pos)) = bitmap_block
                     .iter()
                     .enumerate()
-                    .find(|(_, bits64)| **bits64 != u64::MAX)
-                    .map(|(bits64_pos, bits64)| (bits64_pos, bits64.trailing_ones() as usize))
+                    .find(|(_, bits64)| **bits64 != u64::MAX) //找一个有空闲的
+                    .map(|(bits64_pos, bits64)| {
+                        (bits64_pos, bits64.trailing_ones() as usize) //找到最低的0位并置1
+                    })
                 {
                     // modify cache
                     bitmap_block[bits64_pos] |= 1u64 << inner_pos;

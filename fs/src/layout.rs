@@ -1,18 +1,19 @@
 use super::{
-    BLOCK_SZ,
-    SECTOR_SIZE,
-    FAT_SIZE,
-    BlockDevice,
-    get_info_cache,
-    get_block_cache,
-    fat32_manager::FAT32Manager,
-    CacheMode,
     clone_into_array,
     // println
+    fat32_manager::FAT32Manager,
+    get_block_cache,
+    get_info_cache,
+    BlockDevice,
+    CacheMode,
+    BLOCK_SZ,
+    FAT_SIZE,
+    SECTOR_SIZE,
 };
-use alloc::sync::Arc;
 use alloc::vec::Vec;
+use alloc::{string::String, sync::Arc};
 use core::fmt::{Debug, Formatter, Result};
+use spin::RwLock;
 
 const LEAD_SIGNATURE: u32 = 0x41615252;
 const SECOND_SIGNATURE: u32 = 0x61417272;
@@ -373,7 +374,7 @@ impl ShortDirEntry {
     }
 
     /* 计算校验和 */
- // DEBUG
+    // DEBUG
     pub fn checksum(&self) -> u8 {
         let mut name_buff: [u8; 11] = [0u8; 11];
         let mut sum: u8 = 0;
