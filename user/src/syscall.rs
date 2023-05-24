@@ -5,6 +5,7 @@ const SYSCALL_ACCEPT: usize = 31;
 const SYSCALL_OPEN: usize = 56;
 const SYSCALL_CLOSE: usize = 57;
 const SYSCALL_PIPE: usize = 59;
+const SYSCALL_LSEEK: usize = 62; // To do:
 const SYSCALL_READ: usize = 63;
 const SYSCALL_WRITE: usize = 64;
 const SYSCALL_EXIT: usize = 93;
@@ -71,8 +72,16 @@ pub fn sys_open(path: &str, flags: u32) -> isize {
     syscall(SYSCALL_OPEN, [path.as_ptr() as usize, flags as usize, 0])
 }
 
+/// 功能：当前进程关闭一个文件。
+/// 参数：fd 表示要关闭的文件的文件描述符。
+/// 返回值：如果成功关闭则返回 0 ，否则返回 -1 。可能的出错原因：传入的文件描述符并不对应一个打开的文件。
 pub fn sys_close(fd: usize) -> isize {
     syscall(SYSCALL_CLOSE, [fd, 0, 0])
+}
+
+// To do:
+pub fn sys_lseek(fd: usize, offset: i64, whence: u8) -> isize {
+    syscall(SYSCALL_LSEEK, [fd, offset, whence])
 }
 
 pub fn sys_pipe(pipe: &mut [usize]) -> isize {

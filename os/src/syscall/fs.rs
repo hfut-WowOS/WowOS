@@ -97,3 +97,14 @@ pub fn sys_dup(fd: usize) -> isize {
     inner.fd_table[new_fd] = Some(Arc::clone(inner.fd_table[fd].as_ref().unwrap()));
     new_fd as isize
 }
+
+#[derive(Debug)]
+pub enum SeekFrom {
+    Start(u64),
+    End(i64),
+    Current(i64),
+}
+
+pub fn sys_lseek(fd: usize, offset: i64, whence: u8) -> isize {
+    
+}
