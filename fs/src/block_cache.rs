@@ -130,15 +130,21 @@ impl BlockCacheManager {
     }
 
 
+    /// get_block_cache 方法尝试从块缓存管理器中获取一个编号为 block_id 的块的块缓存
+    /// 如果找不到，会从磁盘读取到内存中
+    /// 有可能会发生缓存替换
     pub fn get_block_cache(
         &mut self,
         block_id: usize,
         block_device: Arc<dyn BlockDevice>,
     ) -> Arc<RwLock<BlockCache>> {
+        // 遍历整个队列试图找到一个编号相同的块缓存，如果找到了，会将块缓存管理器中保存的块缓存的引用复制一份并返回
         if let Some(pair) = self.queue.iter().find(|pair| pair.0 == block_id) {
             Arc::clone(&pair.1)
         } else {
-            // substitute
+            // 对应找不到的情况，此时必须将块从磁盘读入内存中的缓冲区
+            // 判断管理器保存的块缓存数量是否已经达到了上限
+            // 达到了上限需要执行缓存替换算法，丢掉某个块缓存并空出一个空位
             if self.queue.len() == BLOCK_CACHE_SIZE {
                 // from front to tail
                 if let Some((idx, _)) = self
