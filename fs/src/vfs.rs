@@ -2,7 +2,7 @@ use super::{fat32_manager::*, get_info_cache, layout::*, BlockDevice, CacheMode}
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use spin::{Mutex, MutexGuard, RwLock};
+use spin::RwLock;
 
 #[derive(Clone)]
 pub struct VFile {
