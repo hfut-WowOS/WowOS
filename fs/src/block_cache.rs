@@ -8,20 +8,17 @@ use spin::{Mutex, RwLock};
 
 /// 实现磁盘块缓存功能的块缓存层
 pub struct BlockCache {
-    cache: Vec<u8>,                         // 表示位于内存中的缓冲区
-    block_id: usize,                        // 记录了这个块缓存来自于磁盘中的块的编号
-    block_device: Arc<dyn BlockDevice>,     // 一个底层块设备的引用，可通过它进行块读写
-    modified: bool,                         // 记录这个块从磁盘载入内存缓存之后，它有没有被修改过
+    cache: Vec<u8>,                     // 表示位于内存中的缓冲区
+    block_id: usize,                    // 记录了这个块缓存来自于磁盘中的块的编号
+    block_device: Arc<dyn BlockDevice>, // 一个底层块设备的引用，可通过它进行块读写
+    modified: bool,                     // 记录这个块从磁盘载入内存缓存之后，它有没有被修改过
     #[allow(unused)]
-    time_stamp: usize,                      // TODO: 时间戳
+    time_stamp: usize, // TODO: 时间戳
 }
 
 impl BlockCache {
     /// Load a new BlockCache from disk.
-    pub fn new(
-        block_id: usize, 
-        block_device: Arc<dyn BlockDevice>
-    ) -> Self {
+    pub fn new(block_id: usize, block_device: Arc<dyn BlockDevice>) -> Self {
         let mut cache = vec![0u8; BLOCK_SZ];
         block_device.read_block(block_id, &mut cache);
         // TODO: 时间戳
@@ -108,27 +105,21 @@ impl BlockCacheManager {
             queue: VecDeque::new(),
         }
     }
-    pub fn set_start_sec(&mut self, new_start_sec: usize){
+    pub fn set_start_sec(&mut self, new_start_sec: usize) {
         self.start_sec = new_start_sec;
     }
 
-    pub fn get_start_sec(&self)->usize {
+    pub fn get_start_sec(&self) -> usize {
         self.start_sec
     }
 
-    pub fn read_block_cache(
-        &self,
-        block_id: usize,
-    ) -> Option<Arc<RwLock<BlockCache>>>{
-        if let Some(pair) = self.queue
-            .iter()
-            .find(|pair| pair.0 == block_id) {
-                Some(Arc::clone(&pair.1))
-        }else{
+    pub fn read_block_cache(&self, block_id: usize) -> Option<Arc<RwLock<BlockCache>>> {
+        if let Some(pair) = self.queue.iter().find(|pair| pair.0 == block_id) {
+            Some(Arc::clone(&pair.1))
+        } else {
             None
         }
     }
-
 
     /// get_block_cache 方法尝试从块缓存管理器中获取一个编号为 block_id 的块的块缓存
     /// 如果找不到，会从磁盘读取到内存中
@@ -168,25 +159,22 @@ impl BlockCacheManager {
         }
     }
 
-    pub fn drop_all(&mut self){
+    pub fn drop_all(&mut self) {
         self.queue.clear();
     }
-
 }
 
 lazy_static! {
-    pub static ref DATA_BLOCK_CACHE_MANAGER: RwLock<BlockCacheManager> = RwLock::new(
-        BlockCacheManager::new()
-    );
+    pub static ref DATA_BLOCK_CACHE_MANAGER: RwLock<BlockCacheManager> =
+        RwLock::new(BlockCacheManager::new());
 }
 
 lazy_static! {
-    pub static ref INFO_CACHE_MANAGER: RwLock<BlockCacheManager> = RwLock::new(
-        BlockCacheManager::new()
-    );
+    pub static ref INFO_CACHE_MANAGER: RwLock<BlockCacheManager> =
+        RwLock::new(BlockCacheManager::new());
 }
 
-#[derive(PartialEq,Copy,Clone,Debug)]
+#[derive(PartialEq, Copy, Clone, Debug)]
 pub enum CacheMode {
     READ,
     WRITE,
@@ -201,10 +189,17 @@ pub fn get_block_cache(
     let phy_blk_id = DATA_BLOCK_CACHE_MANAGER.read().get_start_sec() + block_id;
     if rw_mode == CacheMode::READ {
         // make sure the blk is in cache
-        DATA_BLOCK_CACHE_MANAGER.write().get_block_cache(phy_blk_id, block_device);
-        DATA_BLOCK_CACHE_MANAGER.read().read_block_cache(phy_blk_id).unwrap()
+        DATA_BLOCK_CACHE_MANAGER
+            .write()
+            .get_block_cache(phy_blk_id, block_device);
+        DATA_BLOCK_CACHE_MANAGER
+            .read()
+            .read_block_cache(phy_blk_id)
+            .unwrap()
     } else {
-        DATA_BLOCK_CACHE_MANAGER.write().get_block_cache(phy_blk_id, block_device)
+        DATA_BLOCK_CACHE_MANAGER
+            .write()
+            .get_block_cache(phy_blk_id, block_device)
     }
 }
 
@@ -217,19 +212,26 @@ pub fn get_info_cache(
     let phy_blk_id = INFO_CACHE_MANAGER.read().get_start_sec() + block_id;
     if rw_mode == CacheMode::READ {
         // make sure the blk is in cache
-        INFO_CACHE_MANAGER.write().get_block_cache(phy_blk_id, block_device);
-        INFO_CACHE_MANAGER.read().read_block_cache(phy_blk_id).unwrap()
+        INFO_CACHE_MANAGER
+            .write()
+            .get_block_cache(phy_blk_id, block_device);
+        INFO_CACHE_MANAGER
+            .read()
+            .read_block_cache(phy_blk_id)
+            .unwrap()
     } else {
-        INFO_CACHE_MANAGER.write().get_block_cache(phy_blk_id, block_device)
+        INFO_CACHE_MANAGER
+            .write()
+            .get_block_cache(phy_blk_id, block_device)
     }
 }
 
-pub fn set_start_sec(start_sec: usize){
+pub fn set_start_sec(start_sec: usize) {
     INFO_CACHE_MANAGER.write().set_start_sec(start_sec);
     DATA_BLOCK_CACHE_MANAGER.write().set_start_sec(start_sec);
 }
 
-pub fn write_to_dev(){  
+pub fn write_to_dev() {
     INFO_CACHE_MANAGER.write().drop_all();
     DATA_BLOCK_CACHE_MANAGER.write().drop_all();
 }
