@@ -1,7 +1,7 @@
 #[allow(unused)]
 use clap::{App, Arg};
 #[allow(unused)]
-use fs::{
+use fat32::{
     BlockDevice, FAT32Manager, VFile, ShortDirEntry, ATTRIBUTE_ARCHIVE, ATTRIBUTE_DIRECTORY,
 };
 #[allow(unused)]

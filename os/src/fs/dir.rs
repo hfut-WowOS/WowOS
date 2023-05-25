@@ -1,34 +1,33 @@
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::mem::size_of;
 use core::slice::{from_raw_parts, from_raw_parts_mut};
-use alloc::string::String;
 
 // 文件名的最大长度
 pub const NAME_LIMIE: usize = 128;
 
-pub const DT_UNKNOWN: u8 = 0;   // 未知类型
-pub const DT_DIR: u8 = 4;       // 目录
-pub const DT_REG: u8 = 8;       // 普通文件
+pub const DT_UNKNOWN: u8 = 0; // 未知类型
+pub const DT_DIR: u8 = 4; // 目录
+pub const DT_REG: u8 = 8; // 普通文件
 
 #[derive(Debug)]
 #[repr(C)]
 pub struct DirEntry {
-    pub inode: usize,   // 索引结点号
-    pub offset: isize,  // 64-bit offset to next structure
-    pub reclen: u16,    // Size of this dirent
-    pub dtype: u8,      // 类型
-    pub name: [u8; NAME_LIMIE],
+    pub inode: usize,           // 索引结点号
+    pub offset: isize,          // 64-bit offset to next structure
+    pub reclen: u16,            // Size of this dirent
+    pub dtype: u8,              // 类型
+    pub name: [u8; NAME_LIMIE], // 文件名
 }
 
 impl DirEntry {
-
     pub fn new(inode: usize, offset: isize, dtype: u8, name: String) -> Self {
         Self {
             inode: inode,
             offset: offset,
             reclen: name.len() as u16,
             name: {
-                let mut tmp: [u8; MAXNAME] = [0; MAXNAME];
+                let mut tmp: [u8; NAME_LIMIE] = [0; NAME_LIMIE];
                 tmp[..name.len()].copy_from_slice(name.as_bytes());
                 tmp
             },

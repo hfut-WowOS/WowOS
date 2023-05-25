@@ -7,12 +7,10 @@ use super::{
     BlockDevice,
     CacheMode,
     BLOCK_SZ,
-    FAT_SIZE,
-    SECTOR_SIZE,
 };
 use alloc::vec::Vec;
 use alloc::{string::String, sync::Arc};
-use core::fmt::{Debug, Formatter, Result};
+use core::fmt::Debug;
 use spin::RwLock;
 
 const LEAD_SIGNATURE: u32 = 0x41615252;

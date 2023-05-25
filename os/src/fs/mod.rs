@@ -7,7 +7,7 @@ use crate::mm::UserBuffer;
 use alloc::sync::Arc;
 
 pub use dir::{DirEntry, DT_DIR, DT_REG, DT_UNKNOWN};
-pub use inode::{list_apps, open, DiskInodeType, OSInode, OpenFlags};
+pub use inode::{list_apps, open_file, DiskInodeType, OSInode, OpenFlags};
 pub use pipe::{make_pipe, Pipe};
 pub use stdio::{Stdin, Stdout};
 

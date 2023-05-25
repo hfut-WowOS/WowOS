@@ -31,7 +31,7 @@ impl VFile {
         long_pos_vec: Vec<(usize, usize)>,
         //first_cluster: u32,
         attribute: u8,
-        size: u32,
+        _size: u32,
         fs: Arc<RwLock<FAT32Manager>>,
         block_device: Arc<dyn BlockDevice>,
     ) -> Self {
@@ -143,6 +143,7 @@ impl VFile {
         let mut step: usize = long_ent_num;
         for i in (long_ent_num - 2)..0 {
             if name_last == name_vec[i] {
+                
                 step = step - i - 1;
                 break;
             }

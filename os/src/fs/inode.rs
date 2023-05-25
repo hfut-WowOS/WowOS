@@ -1,4 +1,3 @@
-use super::File;
 use crate::drivers::BLOCK_DEVICE;
 use crate::mm::UserBuffer;
 use crate::sync::UPIntrFreeCell;
@@ -6,7 +5,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bitflags::*;
 use spin::Mutex;
-use fs::{FAT32Manager, VFile, ATTRIBUTE_ARCHIVE, ATTRIBUTE_DIRECTORY};
+use fat32::{FAT32Manager, VFile, ATTRIBUTE_ARCHIVE, ATTRIBUTE_DIRECTORY};
 use super::{DirEntry, File, DT_DIR, DT_REG, DT_UNKNOWN};
 use lazy_static::*;
 
@@ -162,11 +161,13 @@ impl OSInode {
     }
 }
 
-
+// 进行一些初始化操作将 easy-fs 接入到我们的内核中
 lazy_static! {
     pub static ref ROOT_INODE: Arc<VFile> = {
+        // 从块设备 BLOCK_DEVICE 上打开文件系统
         let fat32_manager = FAT32Manager::open(BLOCK_DEVICE.clone());
         let manager_reader = fat32_manager.read();
+        // 从文件系统中获取根目录的 inode
         Arc::new(manager_reader.get_root_vfile(&fat32_manager))
     };
 }
@@ -181,6 +182,7 @@ pub fn list_apps() {
     println!("**************/")
 }
 
+// 打开文件的标志 OpenFlags
 bitflags! {
     pub struct OpenFlags: u32 {
         const RDONLY = 0;
@@ -208,44 +210,8 @@ impl OpenFlags {
     }
 }
 
-// pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
-//     let (readable, writable) = flags.read_write();
-//     if flags.contains(OpenFlags::CREATE) {
-//         if let Some(inode) = ROOT_INODE.find(name) {
-//             // clear size
-//             inode.clear();
-//             Some(Arc::new(OSInode::new(
-//                 readable,
-//                 writable,
-//                 inode,
-//             )))
-//         } else {
-//             // create file
-//             ROOT_INODE.create(name)
-//                 .map(|inode| {
-//                     Arc::new(OSInode::new(
-//                         readable,
-//                         writable,
-//                         inode,
-//                     ))
-//                 })
-//         }
-//     } else {
-//         ROOT_INODE.find(name)
-//             .map(|inode| {
-//                 if flags.contains(OpenFlags::TRUNC) {
-//                     inode.clear();
-//                 }
-//                 Arc::new(OSInode::new(
-//                     readable,
-//                     writable,
-//                     inode
-//                 ))
-//             })
-//     }
-// }
 
-pub fn open(
+pub fn open_file(
     work_path: &str,
     path: &str,
     flags: OpenFlags,

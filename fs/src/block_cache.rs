@@ -1,35 +1,29 @@
 use super::{BlockDevice, BLOCK_SZ};
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
-use alloc::vec;
-use alloc::vec::Vec;
 use lazy_static::*;
-use spin::{Mutex, RwLock};
+use spin::RwLock;
 
 /// 实现磁盘块缓存功能的块缓存层
 pub struct BlockCache {
-    cache: Vec<u8>,                     // 表示位于内存中的缓冲区
+    // cache: Vec<u8>,                     // 表示位于内存中的缓冲区
+    cache: [u8; BLOCK_SZ],
     block_id: usize,                    // 记录了这个块缓存来自于磁盘中的块的编号
     block_device: Arc<dyn BlockDevice>, // 一个底层块设备的引用，可通过它进行块读写
     modified: bool,                     // 记录这个块从磁盘载入内存缓存之后，它有没有被修改过
-    #[allow(unused)]
-    time_stamp: usize, // TODO: 时间戳
 }
 
 impl BlockCache {
     /// Load a new BlockCache from disk.
     pub fn new(block_id: usize, block_device: Arc<dyn BlockDevice>) -> Self {
-        let mut cache = vec![0u8; BLOCK_SZ];
+        // let mut cache = vec![0u8; BLOCK_SZ];
+        let mut cache = [0u8; BLOCK_SZ];
         block_device.read_block(block_id, &mut cache);
-        // TODO: 时间戳
-        //let mut time_stamp = time::read();
-        let time_stamp = 0;
         Self {
             cache,
             block_id,
             block_device,
             modified: false,
-            time_stamp,
         }
     }
 
@@ -91,7 +85,7 @@ impl Drop for BlockCache {
 // 3-4 FAT2
 // 5-7 DirEntry
 // 8-19 DATA
-const BLOCK_CACHE_SIZE: usize = 20;
+const BLOCK_CACHE_SIZE: usize = 16;
 
 pub struct BlockCacheManager {
     start_sec: usize,
