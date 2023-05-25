@@ -8,6 +8,7 @@ use alloc::{
 };
 use lazy_static::*;
 
+// 分配器
 pub struct RecycleAllocator {
     current: usize,
     recycled: Vec<usize>,
@@ -20,6 +21,8 @@ impl RecycleAllocator {
             recycled: Vec::new(),
         }
     }
+
+    // 分配一个pid
     pub fn alloc(&mut self) -> usize {
         if let Some(id) = self.recycled.pop() {
             id
@@ -28,6 +31,8 @@ impl RecycleAllocator {
             self.current - 1
         }
     }
+
+    // 回收
     pub fn dealloc(&mut self, id: usize) {
         assert!(id < self.current);
         assert!(
@@ -48,6 +53,7 @@ lazy_static! {
 
 pub const IDLE_PID: usize = 0;
 
+// 同一时间存在的所有进程都有一个唯一的进程标识符，它们是互不相同的整数，这样才能表示表示进程的唯一性。
 pub struct PidHandle(pub usize);
 
 pub fn pid_alloc() -> PidHandle {
