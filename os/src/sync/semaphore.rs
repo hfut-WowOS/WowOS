@@ -2,6 +2,7 @@ use crate::sync::UPIntrFreeCell;
 use crate::task::{block_current_and_run_next, current_task, wakeup_task, TaskControlBlock};
 use alloc::{collections::VecDeque, sync::Arc};
 
+// 信号量
 pub struct Semaphore {
     pub inner: UPIntrFreeCell<SemaphoreInner>,
 }

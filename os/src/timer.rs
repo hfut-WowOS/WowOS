@@ -59,11 +59,13 @@ pub fn add_timer(expire_ms: usize, task: Arc<TaskControlBlock>) {
     timers.push(TimerCondVar { expire_ms, task });
 }
 
+/// 在时钟中断的时候则会调用 check_timer 尝试唤醒睡眠超时的线程
 pub fn check_timer() {
     let current_ms = get_time_ms();
     TIMERS.exclusive_session(|timers| {
         while let Some(timer) = timers.peek() {
             if timer.expire_ms <= current_ms {
+                // 调用 wakeup_task 唤醒超时线程
                 wakeup_task(Arc::clone(&timer.task));
                 timers.pop();
             } else {

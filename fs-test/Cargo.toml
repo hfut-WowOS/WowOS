@@ -1,0 +1,10 @@
+[package]
+name = "fs-test"
+version = "0.1.0"
+authors = ["Ming Qi <qiming01@outlook.com>"]
+edition = "2021"
+
+[dependencies]
+clap = "2.33.3"
+fat32 = { path = "../fs" }
+rand = "0.8.0"

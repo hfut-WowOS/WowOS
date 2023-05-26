@@ -3,7 +3,7 @@ use super::manager::insert_into_pid2process;
 use super::TaskControlBlock;
 use super::{add_task, SignalFlags};
 use super::{pid_alloc, PidHandle};
-use crate::fs::{File, Stdin, Stdout};
+use crate::fs::{File, Stdin, Stdout, FileDescriptor};
 use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE};
 use crate::sync::{Condvar, Mutex, Semaphore, UPIntrFreeCell, UPIntrRefMut};
 use crate::trap::{trap_handler, TrapContext};
@@ -12,6 +12,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
 
+// 进程控制块
 pub struct ProcessControlBlock {
     // immutable
     pub pid: PidHandle,
@@ -25,13 +26,20 @@ pub struct ProcessControlBlockInner {
     pub parent: Option<Weak<ProcessControlBlock>>,
     pub children: Vec<Arc<ProcessControlBlock>>,
     pub exit_code: i32,
-    pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
+    // pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
+    pub fd_table: Vec<Option<FileDescriptor>>,
     pub signals: SignalFlags,
+    // 设置一个向量保存进程下所有线程的任务控制块
     pub tasks: Vec<Option<Arc<TaskControlBlock>>>,
+    // 每个进程控制块中都有一个给进程内的线程分配资源的通用分配器
     pub task_res_allocator: RecycleAllocator,
+    
     pub mutex_list: Vec<Option<Arc<dyn Mutex>>>,
+    // 信号量
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
+    // 条件变量
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    pub cwd: String,
 }
 
 impl ProcessControlBlockInner {
@@ -87,11 +95,11 @@ impl ProcessControlBlock {
                     exit_code: 0,
                     fd_table: vec![
                         // 0 -> stdin
-                        Some(Arc::new(Stdin)),
+                        Some(FileDescriptor::Other(Arc::new(Stdin))),
                         // 1 -> stdout
-                        Some(Arc::new(Stdout)),
+                        Some(FileDescriptor::Other(Arc::new(Stdout))),
                         // 2 -> stderr
-                        Some(Arc::new(Stdout)),
+                        Some(FileDescriptor::Other(Arc::new(Stdout))),
                     ],
                     signals: SignalFlags::empty(),
                     tasks: Vec::new(),
@@ -99,6 +107,7 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    cwd:String::from("/"),
                 })
             },
         });
@@ -193,7 +202,7 @@ impl ProcessControlBlock {
         // alloc a pid
         let pid = pid_alloc();
         // copy fd table
-        let mut new_fd_table: Vec<Option<Arc<dyn File + Send + Sync>>> = Vec::new();
+        let mut new_fd_table: Vec<Option<FileDescriptor>> = Vec::new();
         for fd in parent.fd_table.iter() {
             if let Some(file) = fd {
                 new_fd_table.push(Some(file.clone()));
@@ -201,7 +210,7 @@ impl ProcessControlBlock {
                 new_fd_table.push(None);
             }
         }
-        // create child process pcb
+        // 创建子进程的 PCB
         let child = Arc::new(Self {
             pid,
             inner: unsafe {
@@ -218,12 +227,13 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    cwd: parent.cwd.clone(),
                 })
             },
         });
-        // add child
+        // 加入到当前进程的子进程列表中
         parent.children.push(Arc::clone(&child));
-        // create main thread of child process
+        // 创建子进程的主线程控制块，它继承了父进程的 ustack_base
         let task = Arc::new(TaskControlBlock::new(
             Arc::clone(&child),
             parent

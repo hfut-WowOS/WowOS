@@ -10,7 +10,7 @@ pub struct VFile {
     pub short_sector: usize,
     pub short_offset: usize,               //文件短目录项所在扇区和偏移
     pub long_pos_vec: Vec<(usize, usize)>, // 长目录项的位置<sector, offset>
-    //first_cluster: u32,
+    pub first_cluster: u32,// 文件父目录数据的首簇号
     pub attribute: u8,
     //size:u32,
     fs: Arc<RwLock<FAT32Manager>>,
@@ -381,14 +381,6 @@ impl VFile {
             panic!("SD Card no space!!!");
         }
     }
-
-    /*
-    pub fn set_first_cluster(&mut self, first_cluster:u32) {
-        self.first_cluster = first_cluster;
-        self.modify_short_dirent(|se:&mut ShortDirEntry|{
-            se.set_first_cluster(first_cluster);
-        });
-    }*/
 
     /// 在当前目录下创建文件
     pub fn create(&self, name: &str, attribute: u8) -> Option<Arc<VFile>> {

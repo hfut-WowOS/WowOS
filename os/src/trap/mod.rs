@@ -11,7 +11,7 @@ use core::arch::{asm, global_asm};
 use riscv::register::{
     mtvec::TrapMode,
     scause::{self, Exception, Interrupt, Trap},
-    sie, sip, sscratch, sstatus, stval, stvec,
+    sie, sscratch, sstatus, stval, stvec,
 };
 
 global_asm!(include_str!("trap.S"));
@@ -100,9 +100,9 @@ pub fn trap_handler() -> ! {
             check_timer();
             suspend_current_and_run_next();
         }
-        Trap::Interrupt(Interrupt::SupervisorExternal) => {
-            crate::board::irq_handler();
-        }
+        // Trap::Interrupt(Interrupt::SupervisorExternal) => {
+        //     crate::board::irq_handler();
+        // }
         _ => {
             panic!(
                 "Unsupported trap {:?}, stval = {:#x}!",
@@ -148,9 +148,9 @@ pub fn trap_from_kernel(_trap_cx: &TrapContext) {
     let scause = scause::read();
     let stval = stval::read();
     match scause.cause() {
-        Trap::Interrupt(Interrupt::SupervisorExternal) => {
-            crate::board::irq_handler();
-        }
+        // Trap::Interrupt(Interrupt::SupervisorExternal) => {
+        //     crate::board::irq_handler();
+        // }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             set_next_trigger();
             check_timer();

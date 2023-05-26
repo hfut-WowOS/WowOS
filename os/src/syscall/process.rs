@@ -1,4 +1,4 @@
-use crate::fs::{open_file, OpenFlags};
+use crate::fs::{open_file, OpenFlags, ROOT_INODE};
 use crate::mm::{translated_ref, translated_refmut, translated_str};
 use crate::task::{
     current_process, current_task, current_user_token, exit_current_and_run_next, pid2process,
@@ -55,7 +55,7 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
             args = args.add(1);
         }
     }
-    if let Some(app_inode) = open_file(path.as_str(), OpenFlags::RDONLY) {
+    if let Some(app_inode) = open_file(ROOT_INODE.clone(), path.as_str(), OpenFlags::RDONLY) {
         let all_data = app_inode.read_all();
         let process = current_process();
         let argc = args_vec.len();

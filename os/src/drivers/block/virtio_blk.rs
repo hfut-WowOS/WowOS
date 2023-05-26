@@ -57,13 +57,6 @@ impl BlockDevice for VirtIOBlock {
                 .expect("Error when writing VirtIOBlk");
         }
     }
-    fn handle_irq(&self) {
-        self.virtio_blk.exclusive_session(|blk| {
-            while let Ok(token) = blk.pop_used() {
-                self.condvars.get(&token).unwrap().signal();
-            }
-        });
-    }
 }
 
 impl VirtIOBlock {

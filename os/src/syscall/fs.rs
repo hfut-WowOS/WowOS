@@ -1,4 +1,4 @@
-use crate::fs::{make_pipe, open_file, DiskInodeType, File, FileDescriptor, FileType, OpenFlags};
+use crate::fs::{make_pipe, open_file, OpenFlags};
 use crate::mm::{translated_byte_buffer, translated_refmut, translated_str, UserBuffer};
 use crate::task::{current_process, current_user_token};
 use alloc::sync::Arc;
@@ -11,30 +11,13 @@ pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
         return -1;
     }
     if let Some(file) = &inner.fd_table[fd] {
-        let f: Arc<dyn File + Send + Sync> = match &file.ftype {
-            FileType::Abstr(f) => f.clone(),
-            FileType::File(f) => f.clone(),
-            _ => return -1,
-        };
-        if !f.writable() {
+        if !file.writable() {
             return -1;
         }
-
+        let file = file.clone();
         // release current task TCB manually to avoid multi-borrow
         drop(inner);
-
-        let size = f.write(UserBuffer::new(translated_byte_buffer(token, buf, len)));
-        if fd == 2 {
-            let str = str::replace(translated_str(token, buf).as_str(), "\n", "\\n");
-            println!(
-                "sys_write(fd: {}, buf: {}, len: {}) = {}",
-                fd, str, len, size
-            );
-        } else if fd > 2 {
-            println!("sys_write(fd: {}, buf: {}, len: {}", fd, len, size);
-        }
-        size as isize
-
+        file.write(UserBuffer::new(translated_byte_buffer(token, buf, len))) as isize
     } else {
         -1
     }
@@ -48,11 +31,7 @@ pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
         return -1;
     }
     if let Some(file) = &inner.fd_table[fd] {
-        let file: Arc<dyn File + Send + Sync> = match &file.ftype {
-            FileType::Abstr(f) => f.clone(),
-            FileType::File(f) => f.clone(),
-            _ => return -1,
-        };
+        let file = file.clone();
         if !file.readable() {
             return -1;
         }
@@ -68,19 +47,10 @@ pub fn sys_open(path: *const u8, flags: u32) -> isize {
     let process = current_process();
     let token = current_user_token();
     let path = translated_str(token, path);
-    let open_flags = OpenFlags::from_bits(flags).unwrap();
-    let mut inner = process.inner_exclusive_access();
-    if let Some(inode) = open(
-        inner.get_work_path().as_str(),
-        path.as_str(),
-        open_flags,
-        DiskInodeType::File,
-    ) {
+    if let Some(inode) = open_file(path.as_str(), OpenFlags::from_bits(flags).unwrap()) {
+        let mut inner = process.inner_exclusive_access();
         let fd = inner.alloc_fd();
-        inner.fd_table[fd] = Some(FileDescriptor::new(
-            open_flags.contains(OpenFlags::CLOEXEC),
-            FileType::File(inode),
-        ));
+        inner.fd_table[fd] = Some(inode);
         fd as isize
     } else {
         -1

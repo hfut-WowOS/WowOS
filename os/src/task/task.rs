@@ -7,10 +7,11 @@ use crate::{
 };
 use alloc::sync::{Arc, Weak};
 
+// 线程控制块
 pub struct TaskControlBlock {
     // immutable
-    pub process: Weak<ProcessControlBlock>,
-    pub kstack: KernelStack,
+    pub process: Weak<ProcessControlBlock>, // 所属进程的弱引用
+    pub kstack: KernelStack,                // 自身的内核栈
     // mutable
     pub inner: UPIntrFreeCell<TaskControlBlockInner>,
 }
@@ -28,11 +29,11 @@ impl TaskControlBlock {
 }
 
 pub struct TaskControlBlockInner {
-    pub res: Option<TaskUserRes>,
+    pub res: Option<TaskUserRes>, // 线程资源集合
     pub trap_cx_ppn: PhysPageNum,
-    pub task_cx: TaskContext,
-    pub task_status: TaskStatus,
-    pub exit_code: Option<i32>,
+    pub task_cx: TaskContext,    // Trap 上下文
+    pub task_status: TaskStatus, // 线程状态
+    pub exit_code: Option<i32>,  // 线程退出码
 }
 
 impl TaskControlBlockInner {
