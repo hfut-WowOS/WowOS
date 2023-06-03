@@ -203,6 +203,8 @@ impl UserBuffer {
     pub fn new(buffers: Vec<&'static mut [u8]>) -> Self {
         Self { buffers }
     }
+
+    /// 返回user buffer总长度
     pub fn len(&self) -> usize {
         let mut total: usize = 0;
         for b in self.buffers.iter() {
@@ -210,6 +212,85 @@ impl UserBuffer {
         }
         total
     }
+
+    pub fn clear(&mut self) {
+        for buffer in self.buffers.iter_mut() {
+            buffer.iter_mut().map(|byte| *byte = 0);
+        }
+    }
+
+    //从第一个buf开始写入,返回写入长度 返回0 表示写入失败
+    pub fn write(&mut self, buf: &[u8]) -> usize {
+        assert!(self.buffers.len() >= 1);
+        let len = self.len().min(buf.len());
+        let mut write_len = 0;
+        for buffer in self.buffers.iter_mut() {
+            //当前写入的终点
+            let write_end = len.min(write_len + buffer.len());
+
+            //取部分保证两个slice等长
+            let copied_part = &buf[write_len..write_end];
+            let copy_part = &mut buffer[..(write_end - write_len)];
+            copy_part.copy_from_slice(copied_part);
+    
+            //写入完成
+            if write_end == len {
+                break;
+            }
+            write_len += buffer.len();
+        }
+        len
+    }
+    
+    pub fn write_at(&mut self, offset: usize, buff: &[u8]) -> isize {
+        let len = buff.len();
+        if offset + len > self.len() {
+            return -1;
+        }
+        let mut head = 0; // offset of slice in UBuffer
+        let mut current = 0; // current offset of buff
+        
+        for sub_buff in self.buffers.iter_mut() {
+            let sblen = (*sub_buff).len();
+            if head + sblen < offset {
+                continue;
+            } else if head < offset {
+                for j in (offset - head)..sblen {
+                    (*sub_buff)[j] = buff[current];
+                    current += 1;
+                    if current == len {
+                        return len as isize;
+                    }
+                }
+            } else {
+                //head + sblen > offset and head > offset
+                for j in 0..sblen {
+                    (*sub_buff)[j] = buff[current];
+                    current += 1;
+                    if current == len {
+                        return len as isize;
+                    }
+                }
+            }
+            head += sblen;
+        }
+        0
+    }
+
+    pub fn read(&mut self, src: &[u8]) -> usize {
+        let size = self.len().min(src.len());
+        let mut total = 0;
+        for b in self.buffers.iter_mut() {
+            let len = (*b).len().min(size - total);
+            (*b)[..len].copy_from_slice(&src[total..total + len]);
+            total += len;
+            if total >= size {
+                break;
+            }
+        }
+        total
+    }
+
 }
 
 impl IntoIterator for UserBuffer {

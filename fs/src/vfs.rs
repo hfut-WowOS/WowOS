@@ -10,7 +10,6 @@ pub struct VFile {
     pub short_sector: usize,
     pub short_offset: usize,               //文件短目录项所在扇区和偏移
     pub long_pos_vec: Vec<(usize, usize)>, // 长目录项的位置<sector, offset>
-    pub first_cluster: u32,// 文件父目录数据的首簇号
     pub attribute: u8,
     //size:u32,
     fs: Arc<RwLock<FAT32Manager>>,

@@ -3,15 +3,12 @@ use super::{File, FileDescriptor};
 use crate::drivers::BLOCK_DEVICE;
 use crate::mm::UserBuffer;
 use crate::sync::UPIntrFreeCell;
-use spin::{Mutex, RwLock};
 use crate::task::current_process;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use bitflags::*;
 use fat32::*;
 use lazy_static::*;
-
-pub const AT_FDCWD: isize = -100;
 
 // OSInode 表示进程中一个被打开的常规文件或目录
 pub struct OSInode {
@@ -46,7 +43,9 @@ impl OSInode {
 
     pub fn getdents64(&self) -> Option<dirent> {
         let offset = self.inner.exclusive_access().offset;
-        if let Some((name, dinfo, doff, _)) = self.inner.exclusive_access().inode.dirent_info(offset) {
+        if let Some((name, dinfo, doff, _)) =
+            self.inner.exclusive_access().inode.dirent_info(offset)
+        {
             Some(dirent::new(name, dinfo as u64, doff as i64, DT_DIR))
         } else {
             return None;
@@ -59,6 +58,7 @@ impl OSInode {
         let mut buffer = [0u8; 512];
         let mut v: Vec<u8> = Vec::new();
         loop {
+            // 分块读取文件内容
             let len = inner.inode.read_at(inner.offset, &mut buffer);
             if len == 0 {
                 break;
@@ -93,7 +93,6 @@ impl OSInode {
         let (size, _, mt_me, _, _) = inner.inode.stat();
         return size as usize;
     }
-
 
     pub fn stat(&self) -> Option<stat> {
         let inner = self.inner.exclusive_access();
@@ -130,34 +129,6 @@ lazy_static! {
         let manager_reader = fat32_manager.read();
         Arc::new(manager_reader.get_root_vfile(&fat32_manager))
     };
-
-    // 系统Inode表
-    static ref INODE_TABLE: Mutex<Vec<Option<Arc<RwLock<VFile>>>>> = Mutex::new(Vec::new());
-
-    // 打开文件表
-    pub static ref FILE_TABLE: Mutex<Vec<Option<Arc<OSInode>>>> = Mutex::new(Vec::new());
-
-}
-
-pub fn insert_inode_table(inode: VFile) -> Arc<RwLock<VFile>> {
-    let mut inode_table = INODE_TABLE.lock();
-    let first = inode.first_cluster();
-    // 遍历系统Inode表
-    for i in 0..inode_table.len() {
-        let i_inode = Arc::clone(&inode_table[i].as_ref().unwrap());
-        let i_inode_readguard = i_inode.read();
-        if i_inode_readguard.first_cluster() == first && (i_inode_readguard.path() == inode.path() || first != END_CLUSTER) {
-            return Arc::clone(&i_inode);
-        }
-        drop(i_inode_readguard);
-    }
-    let new_inode = Arc::new(RwLock::new(inode));
-    if let Some(n) = (0..inode_table.len()).find(|n| inode_table[*n].is_none()) {
-        inode_table[n] = Some(Arc::clone(&new_inode));
-    } else {
-        inode_table.push(Some(Arc::clone(&new_inode)));
-    }
-    new_inode
 }
 
 pub fn list_apps() {
@@ -214,6 +185,35 @@ pub fn open_file(dir: Arc<VFile>, name: &str, flags: OpenFlags) -> Option<Arc<OS
     }
 }
 
+pub fn open_file_at(fd: isize, name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
+    if let Some(dir) = get_dir(fd, name) {
+        let mut paths: Vec<&str> = name.split("/").collect();
+        let name = paths.pop().unwrap();
+        open_file(dir, name, flags)
+    } else {
+        None
+    }
+}
+
+pub fn mkdir_at(fd: isize, name: &str) -> isize {
+    if let Some(dir) = get_dir(fd, name) {
+        let mut paths: Vec<&str> = name.split("/").collect();
+        let name = paths.pop().unwrap();
+        dir.create(name, ATTRIBUTE_DIRECTORY);
+        0
+    } else {
+        return -1;
+    }
+}
+
+pub fn unlinkat(fd: isize, name: &str) -> isize {
+    if let Some(inode) = open_file_at(fd, name, OpenFlags::RDONLY) {
+        inode.delete()
+    } else {
+        -1
+    }
+}
+
 // 找到打开文件的父目录
 fn get_dir(fd: isize, name: &str) -> Option<Arc<VFile>> {
     let process = current_process();
@@ -228,7 +228,7 @@ fn get_dir(fd: isize, name: &str) -> Option<Arc<VFile>> {
         } else {
             return None;
         }
-    } else if fd == AT_FDCWD {
+    } else if fd == -100 {
         // 相对于当前工作目录
         let mut cwd = inner.cwd.split("/").collect::<Vec<_>>();
 
@@ -310,4 +310,3 @@ impl File for OSInode {
         total_write_size
     }
 }
-

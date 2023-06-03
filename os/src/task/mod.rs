@@ -7,6 +7,7 @@ mod signal;
 mod switch;
 #[allow(clippy::module_inception)]
 mod task;
+use crate::fs::ROOT_INODE;
 
 use self::id::TaskUserRes;
 use crate::fs::{open_file, OpenFlags};
@@ -136,7 +137,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
 
 lazy_static! {
     pub static ref INITPROC: Arc<ProcessControlBlock> = {
-        let inode = open_file("initproc", OpenFlags::RDONLY).unwrap();
+        let inode = open_file(ROOT_INODE.clone(), "initproc", OpenFlags::RDONLY).unwrap();
         let v = inode.read_all();
         ProcessControlBlock::new(v.as_slice())
     };
