@@ -1,6 +1,6 @@
 use super::info::*;
 use super::{File, FileDescriptor};
-use crate::drivers::BLOCK_DEVICE;
+use crate::drivers::{BLOCK_DEVICE, self};
 use crate::mm::UserBuffer;
 use crate::sync::UPIntrFreeCell;
 use crate::task::current_process;
@@ -91,6 +91,7 @@ impl OSInode {
     pub fn get_size(&self) -> usize {
         let inner = self.inner.exclusive_access();
         let (size, _, mt_me, _, _) = inner.inode.stat();
+        drop(inner);
         return size as usize;
     }
 
@@ -307,6 +308,7 @@ impl File for OSInode {
             inner.offset += write_size;
             total_write_size += write_size;
         }
+        drop(inner);
         total_write_size
     }
 }

@@ -159,6 +159,7 @@ pub fn current_add_signal(signal: SignalFlags) {
     process_inner.signals |= signal;
 }
 
+// Use to clone thread
 bitflags! {
     pub struct CloneFlag: usize{
         const CLONE_CHILD_CLEARTID = 0x00_200_000;
