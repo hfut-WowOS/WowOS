@@ -474,7 +474,7 @@ impl MemoryMapArea {
                         let page_offset = va - mmap_base + self.offset;
                         let buf =
                             translated_byte_buffer(page_table.token(), va as *const u8, PAGE_SIZE);
-                        inode.seek(page_offset);
+                        inode.set_offset(page_offset);
                         inode.read(UserBuffer::new(buf));
                         return true;
                     }

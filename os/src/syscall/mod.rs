@@ -65,11 +65,11 @@ use crate::sbi::shutdown;
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
     match syscall_id {
         SYSCALL_SHUTDOWN => shutdown(true),
-        SYSCALL_GETCWD => sys_getcwd(args[0] as *mut u8, args[1] as usize),
+        SYSCALL_GETCWD => sys_get_cwd(args[0] as *mut u8, args[1]),
         SYSCALL_DUP => sys_dup(args[0]),
         SYSCALL_DUP3 => sys_dup3(args[0] as usize, args[1] as usize),
-        SYSCALL_MKDIRAT => sys_mkdirat(args[0] as isize, args[1] as *const u8, args[2] as u32),
-        SYSCALL_UNLINKAT => sys_unlinkat(args[0] as isize, args[1] as *const u8, args[2] as u32),
+        SYSCALL_MKDIRAT => sys_mkdir(args[0] as isize, args[1] as *const u8, args[2] as u32),
+        SYSCALL_UNLINKAT => sys_unlink(args[0] as isize, args[1] as *const u8, args[2] as u32),
         SYSCALL_UMOUNT2 => sys_umount(args[0] as *const u8, args[1] as usize),
         SYSCALL_MOUNT => sys_mount(
             args[0] as *const u8,
@@ -81,14 +81,14 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         SYSCALL_CHDIR => sys_chdir(args[0] as *const u8),
         SYSCALL_OPEN => sys_open(args[0] as isize, args[1] as *const u8, args[2] as u32),
         SYSCALL_CLOSE => sys_close(args[0]),
-        SYSCALL_PIPE => sys_pipe2(args[0] as *mut usize),
+        SYSCALL_PIPE => sys_pipe(args[0] as *mut u32,args[1]),
         SYSCALL_GETDENTS64 => {
-            sys_getdents64(args[0] as usize, args[1] as *const u8, args[2] as usize)
+            sys_getdents64(args[0] as isize, args[1] as *const u8, args[2] as usize)
         }
 
         SYSCALL_READ => sys_read(args[0], args[1] as *const u8, args[2]),
         SYSCALL_WRITE => sys_write(args[0], args[1] as *const u8, args[2]),
-        SYSCALL_FSTAT => sys_fstat(args[0] as usize, args[1] as *const u8),
+        SYSCALL_FSTAT => sys_fstat(args[0] as isize, args[1] as *const u8),
         SYSCALL_EXIT => sys_exit(args[0] as i32),
         SYSCALL_SLEEP => sys_sleep(args[0]),
         SYSCALL_YIELD => sys_yield(),
@@ -103,7 +103,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
         // SYSCALL_FORK => sys_fork(),
         SYSCALL_EXEC => sys_exec(args[0] as *const u8, args[1] as *const usize),
         SYSCALL_MMAP => sys_mmap(args[0], args[1], args[2], args[3], args[4], args[5]),
-        SYSCALL_WAITPID => sys_waitpid(args[0] as isize, args[1] as *mut i32),
+        SYSCALL_WAITPID => sys_wait4(args[0] as isize, args[1] as *mut i32, args[2] as isize),
         SYSCALL_GET_PPID => sys_getppid(),
         SYSCALL_THREAD_CREATE => sys_thread_create(args[0], args[1]),
         SYSCALL_GETTID => sys_gettid(),

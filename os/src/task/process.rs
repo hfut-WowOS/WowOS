@@ -4,13 +4,13 @@ use super::TaskControlBlock;
 use super::{add_task, SignalFlags};
 use super::{pid_alloc, PidHandle};
 use crate::config::MEMORY_MAP_BASE;
-use crate::fs::{File, FileDescriptor, Stdin, Stdout};
+use alloc::string::{String, ToString};
+use crate::fs::{FileDescriptor, Stdin, Stdout};
 use crate::mm::{
     translated_refmut, MapPermission, MemoryMapArea, MemorySet, VirtAddr, VirtPageNum, KERNEL_SPACE,
 };
 use crate::sync::{Condvar, Mutex, Semaphore, UPIntrFreeCell, UPIntrRefMut};
 use crate::trap::{trap_handler, TrapContext};
-use alloc::string::String;
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -328,6 +328,11 @@ impl ProcessControlBlock {
     }
 }
 
+//线程当前工作目录
+//以目录或者文件为单位分割,便于相对路径的修改
+//绝对路径
+//相对路径 (处理. 和 ..)
+#[derive(Clone)]
 pub struct WorkPath {
     pub path: Vec<String>,
 }

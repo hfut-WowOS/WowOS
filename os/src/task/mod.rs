@@ -10,7 +10,7 @@ mod task;
 use crate::fs::ROOT_INODE;
 
 use self::id::TaskUserRes;
-use crate::fs::{open_file, OpenFlags, add_initproc_shell};
+use crate::fs::{open_file, OpenFlags};
 use crate::sbi::shutdown;
 use alloc::{sync::Arc, vec::Vec};
 use lazy_static::*;
@@ -18,13 +18,11 @@ use manager::fetch_task;
 use process::ProcessControlBlock;
 use switch::__switch;
 
+pub use process::WorkPath;
 pub use context::TaskContext;
 pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle, IDLE_PID};
 pub use manager::{add_task, pid2process, remove_from_pid2process, wakeup_task};
-pub use processor::{
-    current_kstack_top, current_process, current_task, current_trap_cx, current_trap_cx_user_va,
-    current_user_token, run_tasks, schedule, take_current_task,
-};
+pub use processor::*;
 pub use signal::SignalFlags;
 pub use task::{TaskControlBlock, TaskStatus};
 
@@ -136,11 +134,30 @@ pub fn exit_current_and_run_next(exit_code: i32) {
 }
 
 lazy_static! {
+    // pub static ref INITPROC: Arc<ProcessControlBlock> = {
+    //     let inode = open_file(ROOT_INODE.clone(), "initproc", OpenFlags::RDONLY).unwrap();
+    //     let v = inode.read_all();
+    //     ProcessControlBlock::new(v.as_slice())
+    // };
     pub static ref INITPROC: Arc<ProcessControlBlock> = {
-        let inode = open_file(ROOT_INODE.clone(), "initproc", OpenFlags::RDONLY).unwrap();
-        let v = inode.read_all();
-        ProcessControlBlock::new(v.as_slice())
+        extern "C" {
+            fn _num_app();
+        }
+        let num_app_ptr = _num_app as usize as *const usize;
+        let num_app = unsafe { num_app_ptr.read_volatile() };
+        let app_start = unsafe { core::slice::from_raw_parts(num_app_ptr.add(1), num_app + 1) };
+
+       ProcessControlBlock::new( unsafe{
+            core::slice::from_raw_parts(
+                app_start[0] as *const u8,
+                app_start[1] - app_start[0]
+            ) }
+        )
     };
+        // 从文件系统中读取 initproc 程序的 elf 数据加载
+        // let inode = open_file("initproc", OpenFlags::O_RDONLY).unwrap();
+        // let v = inode.read_all();
+        // TaskControlBlock::new(v.as_slice())
 }
 
 pub fn add_initproc() {

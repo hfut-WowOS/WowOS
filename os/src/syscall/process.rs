@@ -1,4 +1,4 @@
-use crate::fs::{open_file, OpenFlags, ROOT_INODE};
+use crate::fs::{open_file, OpenFlags, FileType};
 use crate::mm::*;
 use crate::task::*;
 use crate::timer::{get_time_ms, get_time_us, USEC_PER_SEC};
@@ -6,6 +6,7 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::mem::size_of;
+use alloc::string::ToString;
 
 pub fn sys_exit(exit_code: i32) -> ! {
     exit_current_and_run_next(exit_code);
@@ -92,10 +93,18 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
             args = args.add(1);
         }
     }
-    // 获取当前工作目录
-    let cwd = current_process().inner_exclusive_access().cwd.clone();
-    // to do
-    if let Some(app_inode) = open_file(ROOT_INODE.clone(), path.as_str(), OpenFlags::RDONLY) {
+
+    //获取当前工作目录
+    let work_path = current_process()
+        .inner_exclusive_access()
+        .work_path
+        .to_string();
+    if let Some(app_inode) = open_file(
+        &work_path,
+        path.as_str(),
+        OpenFlags::RDONLY,
+        FileType::Regular,
+    ) {
         let all_data = app_inode.read_all();
         let process = current_process();
         let argc = args_vec.len();
@@ -123,6 +132,7 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: 
     let child_task = child_inner.tasks[0].as_ref().unwrap();
     let child_trap_cx = child_task.inner.exclusive_access().get_trap_cx();
     
+    //更改
     if stack_ptr != 0 {
         child_trap_cx.x[2] = stack_ptr;
     }
@@ -132,36 +142,48 @@ pub fn sys_clone(flags: usize, stack_ptr: usize, ptid: usize, tls: usize, ctid: 
 
 /// If there is not a child process whose pid is same as given, return -1.
 /// Else if there is a child process but it is still running, return -2.
-pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
-    let process = current_process();
-    // find a child process
-
-    let mut inner = process.inner_exclusive_access();
-    if !inner
-        .children
-        .iter()
-        .any(|p| pid == -1 || pid as usize == p.getpid())
-    {
-        return -1;
-        // ---- release current PCB
+pub fn sys_wait4(pid: isize, status: *mut i32, options: isize) -> isize {
+    if options != 0{
+        panic!{"Extended option not support yet..."};
     }
-    let pair = inner.children.iter().enumerate().find(|(_, p)| {
-        // ++++ temporarily access child PCB exclusively
-        p.inner_exclusive_access().is_zombie && (pid == -1 || pid as usize == p.getpid())
-        // ++++ release child PCB
-    });
-    if let Some((idx, _)) = pair {
-        let child = inner.children.remove(idx);
-        // confirm that child will be deallocated after being removed from children list
-        assert_eq!(Arc::strong_count(&child), 1);
-        let found_pid = child.getpid();
-        // ++++ temporarily access child PCB exclusively
-        let exit_code = child.inner_exclusive_access().exit_code;
-        // ++++ release child PCB
-        *translated_refmut(inner.memory_set.token(), exit_code_ptr) = exit_code;
-        found_pid as isize
-    } else {
-        -2
+    loop {
+        let process = current_process();
+        // find a child process
+        //failed return-1
+        let mut inner = process.inner_exclusive_access();
+        if !inner
+            .children
+            .iter()
+            .any(|p| pid == -1 || pid as usize == p.getpid())
+        {
+            return -1;
+            // ---- release current PCB
+        }
+        let pair = inner.children.iter().enumerate().find(|(_, p)| {
+            // ++++ temporarily access child PCB exclusively
+            p.inner_exclusive_access().is_zombie && (pid == -1 || pid as usize == p.getpid())
+            // ++++ release child PCB
+        });
+        if let Some((idx, _)) = pair {
+            let child = inner.children.remove(idx);
+            // confirm that child will be deallocated after being removed from children list
+            assert_eq!(Arc::strong_count(&child), 1);
+            let found_pid = child.getpid();
+            // ++++ temporarily access child PCB exclusively
+            let exit_code = child.inner_exclusive_access().exit_code;
+            // ++++ release child PCB
+
+            //mjqadd
+            let sstatus = exit_code << 8;
+            if (status as usize) != 0 {
+                *translated_refmut(inner.memory_set.token(), status) = sstatus;
+            }
+            return found_pid as isize;
+        } else {
+            drop(inner);
+            drop(process);
+            suspend_current_and_run_next();
+        }
     }
     // ---- release current PCB automatically
 }

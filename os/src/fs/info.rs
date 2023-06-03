@@ -34,6 +34,16 @@ impl dirent {
         }
     }
 
+    pub fn default() -> Self {
+        Self {
+            d_ino: 0,
+            d_off: 0,
+            d_reclen: 0,
+            d_type: 0,
+            d_name: [0; MAX_NAME_LENTH],
+        }
+    }
+
     pub fn fill_info(&mut self, name: &str, inode: u64, d_off: i64, d_reclen: u16, d_type: u8) {
         *self = Self {
             d_ino: inode,
@@ -47,8 +57,8 @@ impl dirent {
     fn str2bytes(str: &str) -> [u8; MAX_NAME_LENTH] {
         let bytes = str.as_bytes();
         let len = bytes.len();
-        assert!(len <= 128);
-        let mut buf = [0u8; 128];
+        assert!(len <= MAX_NAME_LENTH);
+        let mut buf = [0u8; MAX_NAME_LENTH];
         let copy_part = &mut buf[..len];
         copy_part.copy_from_slice(bytes);
         buf
