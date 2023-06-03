@@ -42,18 +42,17 @@ pub fn run_tasks() {
         if let Some(task) = fetch_task() {
             let idle_task_cx_ptr = processor.get_idle_task_cx_ptr();
             // access coming task TCB exclusively
-            let next_task_cx_ptr = task.inner.exclusive_session(|task_inner| {
-                task_inner.task_status = TaskStatus::Running;
-                &task_inner.task_cx as *const TaskContext
-            });
+            let mut task_inner = task.inner_exclusive_access();
+            let next_task_cx_ptr = &task_inner.task_cx as *const TaskContext;
+            task_inner.task_status = TaskStatus::Running;
+            drop(task_inner);
+            // release coming task TCB manually
             processor.current = Some(task);
             // release processor manually
             drop(processor);
             unsafe {
                 __switch(idle_task_cx_ptr, next_task_cx_ptr);
             }
-        } else {
-            println!("no tasks available in run_tasks");
         }
     }
 }
