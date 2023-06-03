@@ -310,3 +310,39 @@ impl File for OSInode {
         total_write_size
     }
 }
+
+pub fn add_initproc_shell() {
+    extern "C" {
+        fn _num_app();
+    }
+    let num_app_ptr = _num_app as usize as *mut usize;
+    let app_start = unsafe { core::slice::from_raw_parts_mut(num_app_ptr.add(1), 3) };
+
+    if let Some(inode) = open_file(ROOT_INODE.clone(), "initproc", OpenFlags::CREATE) {
+        println!("Create initproc ");
+        let mut data: Vec<&'static mut [u8]> = Vec::new();
+        data.push(unsafe {
+            core::slice::from_raw_parts_mut(app_start[0] as *mut u8, app_start[1] - app_start[0])
+        });
+        println!("Start write initproc ");
+        inode.write(UserBuffer::new(data));
+        println!("initproc OK");
+    } else {
+        panic!("initproc create fail!");
+    }
+
+    if let Some(inode) = open_file(ROOT_INODE.clone(), "user_shell", OpenFlags::CREATE) {
+        println!("Create user_shell ");
+        let mut data: Vec<&'static mut [u8]> = Vec::new();
+        data.push(unsafe {
+            core::slice::from_raw_parts_mut(app_start[1] as *mut u8, app_start[2] - app_start[1])
+        });
+        println!("Start write user_shell ");
+        inode.write(UserBuffer::new(data));
+        println!("User_shell OK");
+    } else {
+        panic!("user_shell create fail!");
+    }
+
+    println!("Write apps(initproc & user_shell) to disk from mem");
+}

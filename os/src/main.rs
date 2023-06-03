@@ -31,6 +31,7 @@ use crate::drivers::chardev::CharDevice;
 use crate::drivers::chardev::UART;
 
 core::arch::global_asm!(include_str!("entry.asm"));
+core::arch::global_asm!(include_str!("link_app.asm"));
 
 fn clear_bss() {
     extern "C" {
@@ -68,6 +69,7 @@ pub fn rust_main() -> ! {
     timer::set_next_trigger();
     board::device_init();
     fs::list_apps();
+    fs::add_initproc_shell();
     task::add_initproc();
     *DEV_NON_BLOCKING_ACCESS.exclusive_access() = true;
     task::run_tasks();

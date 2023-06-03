@@ -16,7 +16,7 @@ const LINE_START: &str = ">> ";
 use alloc::string::String;
 use alloc::vec::Vec;
 use user_lib::console::getchar;
-use user_lib::{close, dup, exec, fork, open, pipe, waitpid, OpenFlags};
+use user_lib::{close, dup, exec, fork, open, pipe, waitpid, OpenFlags, shutdown};
 
 #[derive(Debug)]
 struct ProcessArguments {
@@ -74,10 +74,63 @@ impl ProcessArguments {
     }
 }
 
+fn autotest() {
+    println!("------------ autotest -------------");
+    let mut test = Vec::new();
+    test.push("brk\0");
+    test.push("chdir\0");
+    test.push("clone\0");
+    test.push("close\0");
+    test.push("dup\0");
+    test.push("dup2\0");
+    test.push("execve\0");
+    test.push("exit\0");
+    test.push("fork\0");
+    test.push("fstat\0");
+    test.push("getcwd\0");
+    test.push("getdents\0");
+    test.push("getpid\0");
+    test.push("getppid\0");
+    test.push("gettimeofday\0");
+    test.push("mkdir_\0");
+    test.push("mmap\0");
+    test.push("mount\0");
+    test.push("munmap\0");
+    test.push("open\0");
+    test.push("openat\0");
+    test.push("pipe\0");
+    test.push("read\0");
+    test.push("sleep\0");
+    test.push("times\0");
+    test.push("umount\0");
+    test.push("uname\0");
+    test.push("unlink\0");
+    test.push("wait\0");
+    test.push("waitpid\0");
+    test.push("write\0");
+    test.push("yield\0");
+    
+    for p in test.iter() {
+        let mut exit_code = 0;
+        let pid = fork();
+        if pid == 0 {
+            if exec(p, &[core::ptr::null::<u8>()]) == -1 {
+                println!("test {} error", p);
+                shutdown();
+            }
+        } else {
+            waitpid(pid as usize, &mut exit_code);
+        }
+    }
+    println!("------------ autotest pass -------------");
+    shutdown();
+}
+
 #[no_mangle]
 pub fn main() -> i32 {
     println!("Rust user shell");
     let mut line: String = String::new();
+    autotest();
     print!("{}", LINE_START);
     loop {
         let c = getchar();

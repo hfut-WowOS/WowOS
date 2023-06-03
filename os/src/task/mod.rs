@@ -10,7 +10,7 @@ mod task;
 use crate::fs::ROOT_INODE;
 
 use self::id::TaskUserRes;
-use crate::fs::{open_file, OpenFlags};
+use crate::fs::{open_file, OpenFlags, add_initproc_shell};
 use crate::sbi::shutdown;
 use alloc::{sync::Arc, vec::Vec};
 use lazy_static::*;
@@ -157,4 +157,12 @@ pub fn current_add_signal(signal: SignalFlags) {
     let process = current_process();
     let mut process_inner = process.inner_exclusive_access();
     process_inner.signals |= signal;
+}
+
+bitflags! {
+    pub struct CloneFlag: usize{
+        const CLONE_CHILD_CLEARTID = 0x00_200_000;
+        const CLONE_CHILD_SETTID   = 0x01_000_000;
+        const CLONE_SIGHLD         = 17;
+    }
 }
