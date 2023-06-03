@@ -3,8 +3,11 @@ use super::manager::insert_into_pid2process;
 use super::TaskControlBlock;
 use super::{add_task, SignalFlags};
 use super::{pid_alloc, PidHandle};
-use crate::fs::{File, Stdin, Stdout, FileDescriptor};
-use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE};
+use crate::config::MEMORY_MAP_BASE;
+use crate::fs::{File, FileDescriptor, Stdin, Stdout};
+use crate::mm::{
+    translated_refmut, MapPermission, MemoryMapArea, MemorySet, VirtAddr, VirtPageNum, KERNEL_SPACE,
+};
 use crate::sync::{Condvar, Mutex, Semaphore, UPIntrFreeCell, UPIntrRefMut};
 use crate::trap::{trap_handler, TrapContext};
 use alloc::string::String;
@@ -33,13 +36,18 @@ pub struct ProcessControlBlockInner {
     pub tasks: Vec<Option<Arc<TaskControlBlock>>>,
     // 每个进程控制块中都有一个给进程内的线程分配资源的通用分配器
     pub task_res_allocator: RecycleAllocator,
-    
+
     pub mutex_list: Vec<Option<Arc<dyn Mutex>>>,
     // 信号量
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     // 条件变量
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
     pub cwd: String,
+    // user_heap
+    pub heap_base: VirtAddr,
+    pub heap_end: VirtAddr,
+    pub mmap_area_base: VirtAddr,
+    pub mmap_area_end: VirtAddr,
 }
 
 impl ProcessControlBlockInner {
@@ -57,6 +65,14 @@ impl ProcessControlBlockInner {
         }
     }
 
+    // alloc a specific new_fd
+    pub fn alloc_specific_fd(&mut self, new_fd: usize) -> usize {
+        for _ in self.fd_table.len()..=new_fd {
+            self.fd_table.push(None);
+        }
+        new_fd
+    }
+
     pub fn alloc_tid(&mut self) -> usize {
         self.task_res_allocator.alloc()
     }
@@ -72,16 +88,41 @@ impl ProcessControlBlockInner {
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
     }
+
+    pub fn mmap(
+        &mut self,
+        start: usize,
+        len: usize,
+        prot: usize,
+        flags: usize,
+        fd: usize,
+        offset: usize,
+    ) {
+        let start_va = start.into();
+        let end_va = (start + len).into();
+        // 测例prot定义与MapPermission正好差一位
+        let map_perm = MapPermission::from_bits((prot << 1) as u8).unwrap() | MapPermission::U;
+
+        self.memory_set.insert_mmap_area(MemoryMapArea::new(
+            start_va, end_va, map_perm, fd, offset, flags,
+        ));
+        self.mmap_area_end = end_va;
+    }
+
+    pub fn munmap(&mut self, start: usize, len: usize) -> bool {
+        let start_vpn = VirtPageNum::from(VirtAddr::from(start));
+        self.memory_set.remove_mmap_area(start_vpn)
+    }
 }
 
 impl ProcessControlBlock {
     pub fn inner_exclusive_access(&self) -> UPIntrRefMut<'_, ProcessControlBlockInner> {
         self.inner.exclusive_access()
     }
-
+    // 只有init proc调用,其他的线程从fork产生
     pub fn new(elf_data: &[u8]) -> Arc<Self> {
         // memory_set with elf program headers/trampoline/trap context/user stack
-        let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
+        let (memory_set, uheap_base, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
         // allocate a pid
         let pid_handle = pid_alloc();
         let process = Arc::new(Self {
@@ -107,7 +148,11 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
-                    cwd:String::from("/"),
+                    cwd: String::from("/"),
+                    heap_base: uheap_base.into(),
+                    heap_end: uheap_base.into(),
+                    mmap_area_base: MEMORY_MAP_BASE.into(),
+                    mmap_area_end: MEMORY_MAP_BASE.into(),
                 })
             },
         });
@@ -144,10 +189,16 @@ impl ProcessControlBlock {
     pub fn exec(self: &Arc<Self>, elf_data: &[u8], args: Vec<String>) {
         assert_eq!(self.inner_exclusive_access().thread_count(), 1);
         // memory_set with elf program headers/trampoline/trap context/user stack
-        let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
+        let (memory_set, uheap_base, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
         let new_token = memory_set.token();
         // substitute memory_set
         self.inner_exclusive_access().memory_set = memory_set;
+        // 重新设置堆大小
+        self.inner.exclusive_access().heap_base = uheap_base.into();
+        self.inner.exclusive_access().heap_end = uheap_base.into();
+        // 重新设置mmap_area
+        self.inner.exclusive_access().mmap_area_base = MEMORY_MAP_BASE.into();
+        self.inner.exclusive_access().mmap_area_end = MEMORY_MAP_BASE.into();
         // then we alloc user resource for main thread again
         // since memory_set has been changed
         let task = self.inner_exclusive_access().get_task(0);
@@ -210,7 +261,9 @@ impl ProcessControlBlock {
                 new_fd_table.push(None);
             }
         }
-        // 创建子进程的 PCB
+        // copy work path
+        let path = parent.cwd.clone();
+        // create child process pcb
         let child = Arc::new(Self {
             pid,
             inner: unsafe {
@@ -227,13 +280,17 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
-                    cwd: parent.cwd.clone(),
+                    cwd: path,
+                    heap_base: parent.heap_base,
+                    heap_end: parent.heap_end,
+                    mmap_area_base: parent.mmap_area_base,
+                    mmap_area_end: parent.mmap_area_end,
                 })
             },
         });
-        // 加入到当前进程的子进程列表中
+        // add child
         parent.children.push(Arc::clone(&child));
-        // 创建子进程的主线程控制块，它继承了父进程的 ustack_base
+        // create main thread of child process
         let task = Arc::new(TaskControlBlock::new(
             Arc::clone(&child),
             parent
