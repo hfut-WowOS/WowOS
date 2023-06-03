@@ -27,9 +27,6 @@ mod task;
 mod timer;
 mod trap;
 
-use crate::drivers::chardev::CharDevice;
-use crate::drivers::chardev::UART;
-
 core::arch::global_asm!(include_str!("entry.asm"));
 core::arch::global_asm!(include_str!("link_app.asm"));
 
@@ -56,20 +53,20 @@ lazy_static! {
 pub fn rust_main() -> ! {
     clear_bss();
     mm::init();
-    UART.init();
-    println!("KERN: init gpu");
-    let _gpu = GPU_DEVICE.clone();
-    println!("KERN: init keyboard");
-    let _keyboard = KEYBOARD_DEVICE.clone();
-    println!("KERN: init mouse");
-    let _mouse = MOUSE_DEVICE.clone();
-    println!("KERN: init trap");
+    // UART.init();
+    // println!("KERN: init gpu");
+    // let _gpu = GPU_DEVICE.clone();
+    // println!("KERN: init keyboard");
+    // let _keyboard = KEYBOARD_DEVICE.clone();
+    // println!("KERN: init mouse");
+    // let _mouse = MOUSE_DEVICE.clone();
+    // println!("KERN: init trap");
     trap::init();
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
     board::device_init();
     fs::list_apps();
-    fs::add_initproc_shell();
+    //fs::add_initproc_shell();
     task::add_initproc();
     *DEV_NON_BLOCKING_ACCESS.exclusive_access() = true;
     task::run_tasks();

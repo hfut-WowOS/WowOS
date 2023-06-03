@@ -1,26 +1,25 @@
-use super::info::*;
-use super::{File, FileDescriptor};
-use crate::drivers::{BLOCK_DEVICE, self};
-use crate::mm::UserBuffer;
-use crate::sync::UPIntrFreeCell;
-use crate::task::current_process;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use bitflags::*;
-use fat32::*;
-use lazy_static::*;
 
-// OSInode 表示进程中一个被打开的常规文件或目录
+use fat32::{FAT32Manager, VFile};
+use fat32::{ATTRIBUTE_ARCHIVE, ATTRIBUTE_DIRECTORY, ATTRIBUTE_LFN, BLOCK_SZ};
+use lazy_static::lazy_static;
+use spin::Mutex;
+
+use crate::drivers::BLOCK_DEVICE;
+use super::*;
+use crate::mm::UserBuffer;
+// use crate::task::current_user_token;
+
 pub struct OSInode {
-    // 表明该文件是否允许通过 sys_read/write 进行读写
     readable: bool,
     writable: bool,
-    inner: UPIntrFreeCell<OSInodeInner>,
+    inner: Mutex<OsInodeInner>,
 }
 
-pub struct OSInodeInner {
-    offset: usize,     // 偏移量
-    inode: Arc<VFile>, // 文件系统中的inode
+pub struct OsInodeInner {
+    offset: usize,
+    inode: Arc<VFile>,
 }
 
 impl OSInode {
@@ -28,116 +27,213 @@ impl OSInode {
         Self {
             readable,
             writable,
-            inner: unsafe { UPIntrFreeCell::new(OSInodeInner { offset: 0, inode }) },
+            inner: Mutex::new(OsInodeInner { offset: 0, inode }),
         }
     }
 
-    pub fn seek(&self, off: usize) {
-        self.inner.exclusive_access().offset = off;
-    }
-
-    pub fn delete(&self) -> isize {
-        self.inner.exclusive_access().inode.remove();
-        0
-    }
-
-    pub fn getdents64(&self) -> Option<dirent> {
-        let offset = self.inner.exclusive_access().offset;
-        if let Some((name, dinfo, doff, _)) =
-            self.inner.exclusive_access().inode.dirent_info(offset)
-        {
-            Some(dirent::new(name, dinfo as u64, doff as i64, DT_DIR))
-        } else {
-            return None;
-        }
-    }
-
-    /// 从文件中读出信息放入缓冲区中
     pub fn read_all(&self) -> Vec<u8> {
-        let mut inner = self.inner.exclusive_access();
-        let mut buffer = [0u8; 512];
-        let mut v: Vec<u8> = Vec::new();
+        let mut inner = self.inner.lock();
+        let mut buf = [0u8; BLOCK_SZ];
+        let mut vec = Vec::new();
+
         loop {
-            // 分块读取文件内容
-            let len = inner.inode.read_at(inner.offset, &mut buffer);
-            if len == 0 {
+            //分块读取文件内容
+            let size = inner.inode.read_at(inner.offset, &mut buf);
+            if size == 0 {
                 break;
             }
-            inner.offset += len;
-            v.extend_from_slice(&buffer[..len]);
+            inner.offset += size;
+            vec.extend_from_slice(&buf[..size]);
         }
-        v
+
+        vec
     }
 
-    pub fn write_all(&self, str_vec: &Vec<u8>) -> usize {
-        let mut inner = self.inner.exclusive_access();
-        let mut remain = str_vec.len();
-        let mut base = 0;
-        loop {
-            let len = remain.min(512);
-            inner
-                .inode
-                .write_at(inner.offset, &str_vec.as_slice()[base..base + len]);
-            inner.offset += len;
-            base += len;
-            remain -= len;
-            if remain == 0 {
-                break;
-            }
-        }
-        return base;
+    pub fn is_dir(&self) -> bool {
+        let inner = self.inner.lock();
+        inner.inode.is_dir()
+    }
+
+    pub fn clear(&self) {
+        let inner = self.inner.lock();
+        inner.inode.clear()
+    }
+
+    pub fn delete(&self) -> usize {
+        self.inner.lock().inode.remove()
     }
 
     pub fn get_size(&self) -> usize {
-        let inner = self.inner.exclusive_access();
-        let (size, _, mt_me, _, _) = inner.inode.stat();
-        drop(inner);
-        return size as usize;
+        self.inner.lock().inode.get_size() as usize
     }
 
-    pub fn stat(&self) -> Option<stat> {
-        let inner = self.inner.exclusive_access();
-        let (size, atime, mtime, ctime, _) = inner.inode.stat();
-        if let Some((_, _, dinfo, _)) = inner.inode.dirent_info(inner.offset) {
-            Some(stat::new(
-                0o664,
-                dinfo as u64,
-                3,
-                1,
-                size.max(inner.offset as i64),
-                atime,
-                mtime,
-                ctime,
-            ))
+    pub fn set_offset(&self, offset: usize) {
+        self.inner.lock().offset = offset;
+    }
+
+    //在当前目录下创建文件
+    pub fn create(&self, path: &str, _type: FileType) -> Option<Arc<OSInode>> {
+        let inode = self.inner.lock().inode.clone();
+        if !inode.is_dir() {
+            println!("It's not a directory");
+            return None;
+        }
+        let mut path_split: Vec<&str> = path.split('/').collect();
+        let (readable, writable) = (true, true);
+        if let Some(target_inode) = inode.find_vfile_bypath(path_split.clone()) {
+            target_inode.remove();
+        }
+        let filename = path_split.pop().unwrap();
+
+        //创建失败的条件包括: 目录不存在,存在文件但不是目录
+        match inode.find_vfile_bypath(path_split) {
+            None => None,
+            Some(vfile) => {
+                if !vfile.is_dir() {
+                    None
+                } else {
+                    let attr = _type.into();
+                    vfile
+                        .create(filename, attr)
+                        .map(|inode| Arc::new(OSInode::new(readable, writable, inode)))
+                }
+            }
+        }
+    }
+
+    pub fn find(&self, path: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
+        let inner = self.inner.lock();
+        let path_split = path.split('/').collect();
+
+        inner.inode.find_vfile_bypath(path_split).map(|inode| {
+            let (readable, writable) = flags.read_write();
+            Arc::new(OSInode::new(readable, writable, inode.clone()))
+        })
+    }
+
+    pub fn get_dirent(&self, dirent: &mut dirent) -> isize {
+        let mut inner = self.inner.lock();
+        if let Some((name, offset, first_clu, attr)) = inner.inode.dirent_info(inner.offset) {
+            let d_type = if attr & ATTRIBUTE_ARCHIVE != 0 {
+                DT_REG
+            } else if attr & ATTRIBUTE_DIRECTORY != 0 {
+                DT_DIR
+            } else {
+                DT_UNKNOWN
+            };
+
+            dirent.fill_info(
+                &name,
+                first_clu as u64,
+                offset as i64,
+                (offset as usize - inner.offset) as u16,
+                d_type,
+            );
+
+            inner.offset = offset as usize;
+            let len = (name.len() + 8 * 4) as isize;
+            len
         } else {
-            Some(stat::new(
-                0o664,
-                0,
-                3,
-                1,
-                size.max(inner.offset as i64),
-                atime,
-                mtime,
-                ctime,
-            ))
+            -1
+        }
+    }
+
+    pub fn get_fstat(&self, fstat: &mut Kstat) {
+        let vfile = self.inner.lock().inode.clone();
+
+        let (size, access_t, modify_t, create_t, inode_num) = vfile.stat();
+        let st_mode = {
+            if vfile.is_dir() {
+                VFSFlag::create_flag(VFSFlag::S_IFDIR, VFSFlag::S_IRWXU, VFSFlag::S_IRWXG)
+            } else {
+                VFSFlag::create_flag(VFSFlag::S_IFREG, VFSFlag::S_IRWXU, VFSFlag::S_IRWXG)
+            }
+        }
+        .bits();
+
+        fstat.update(
+            inode_num,
+            st_mode,
+            size as u32,
+            access_t,
+            modify_t,
+            create_t,
+        );
+    }
+}
+
+impl File for OSInode {
+    fn readable(&self) -> bool {
+        self.readable
+    }
+
+    fn writable(&self) -> bool {
+        self.writable
+    }
+
+    fn read(&self, mut buf: UserBuffer) -> usize {
+        let mut inner = self.inner.lock();
+        let mut read_size = 0;
+        for slice in buf.buffers.iter_mut() {
+            let size = inner.inode.read_at(inner.offset, *slice);
+            if size == 0 {
+                break;
+            }
+            inner.offset += size;
+            read_size += size;
+        }
+
+        read_size
+    }
+
+    fn write(&self, buf: UserBuffer) -> usize {
+        let mut inner = self.inner.lock();
+        let mut write_size = 0;
+        for buffer in buf.buffers.iter() {
+            let size = inner.inode.write_at(inner.offset, *buffer);
+            if size == 0 {
+                break;
+            }
+            inner.offset += size;
+            write_size + size;
+        }
+        write_size
+    }
+}
+
+pub fn get_current_inode(curr_path: &str) -> Arc<VFile> {
+    if curr_path == "/" || curr_path.contains("^/") {
+        ROOT_INODE.clone()
+    } else {
+        let path: Vec<&str> = curr_path.split("/").collect();
+        ROOT_INODE.find_vfile_bypath(path).unwrap()
+    }
+}
+
+
+#[inline]
+pub fn ch_dir(curr_path: &str, path: &str) -> isize {
+    let curr_inode = get_current_inode(curr_path);
+    let path_split: Vec<&str> = path.split("/").collect();
+    match curr_inode.find_vfile_bypath(path_split) {
+        None => -1,
+        Some(inode) => {
+            let attribute = inode.get_attribute();
+            if attribute == ATTRIBUTE_DIRECTORY || attribute == ATTRIBUTE_LFN {
+                0
+            } else {
+                -1
+            }
         }
     }
 }
 
 lazy_static! {
     pub static ref ROOT_INODE: Arc<VFile> = {
-        let fat32_manager = FAT32Manager::open(BLOCK_DEVICE.clone());
-        let manager_reader = fat32_manager.read();
-        Arc::new(manager_reader.get_root_vfile(&fat32_manager))
+        let fat_manager = FAT32Manager::open(BLOCK_DEVICE.clone());
+        let reader = fat_manager.read();
+        Arc::new(reader.get_root_vfile(&fat_manager))
     };
-}
-
-pub fn list_apps() {
-    println!("/**** APPS ****");
-    for app in ROOT_INODE.ls().unwrap() {
-        println!("{}", app.0);
-    }
-    println!("**************/")
 }
 
 bitflags! {
@@ -145,14 +241,16 @@ bitflags! {
         const RDONLY = 0;
         const WRONLY = 1 << 0;
         const RDWR = 1 << 1;
-        const CREATE = 1 << 9;
+        const CREATE = 1 << 6;
         const TRUNC = 1 << 10;
+        const DIRECTROY = 0200000;
+        const LARGEFILE  = 0100000;
+        const CLOEXEC = 02000000;
     }
 }
 
 impl OpenFlags {
-    /// Do not check validity for simplicity
-    /// Return (readable, writable)
+    //(readable,writable)
     pub fn read_write(&self) -> (bool, bool) {
         if self.is_empty() {
             (true, false)
@@ -164,187 +262,58 @@ impl OpenFlags {
     }
 }
 
-pub fn open_file(dir: Arc<VFile>, name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
-    let (readable, writable) = flags.read_write();
-    if flags.contains(OpenFlags::CREATE) {
-        if let Some(inode) = dir.find_vfile_byname(name) {
-            // clear size
-            inode.clear();
-            Some(Arc::new(OSInode::new(readable, writable, Arc::new(inode))))
-        } else {
-            // create file
-            dir.create(name, ATTRIBUTE_ARCHIVE)
-                .map(|inode| Arc::new(OSInode::new(readable, writable, inode)))
+pub fn list_apps() {
+    println!("/**** APPS ****");
+    for app in ROOT_INODE.ls_lite().unwrap() {
+        println!("{}", app.0);
+    }
+    println!("**************/")
+}
+
+pub enum FileType {
+    Dir,
+    Regular,
+}
+
+impl Into<u8> for FileType {
+    fn into(self) -> u8 {
+        match self {
+            FileType::Dir => ATTRIBUTE_DIRECTORY,
+            FileType::Regular => ATTRIBUTE_ARCHIVE,
         }
+    }
+}
+
+//path可以是基于当前工作路径的相对路径或者绝对路径
+pub fn open_file(
+    work_path: &str,
+    path: &str,
+    flags: OpenFlags,
+    _type: FileType,
+) -> Option<Arc<OSInode>> {
+    let cur_inode = get_current_inode(work_path);
+    let (readable, writable) = flags.read_write();
+    let mut path_split: Vec<&str> = path.split('/').collect();
+
+    //创建文件
+    if flags.contains(OpenFlags::CREATE) {
+        //如果文件存在删除对应文件
+        if let Some(inode) = cur_inode.find_vfile_bypath(path_split.clone()) {
+            inode.remove();
+        }
+
+        let filename = path_split.pop().unwrap();
+        let dir = cur_inode.find_vfile_bypath(path_split).unwrap();
+        let attr = _type.into();
+        //创建文件
+        dir.create(filename, attr)
+            .map(|inode| Arc::new(OSInode::new(readable, writable, inode)))
     } else {
-        dir.find_vfile_byname(name).map(|inode| {
+        cur_inode.find_vfile_bypath(path_split).map(|inode| {
             if flags.contains(OpenFlags::TRUNC) {
-                inode.clear();
+                inode.clear()
             }
-            Arc::new(OSInode::new(readable, writable, Arc::new(inode)))
+            Arc::new(OSInode::new(readable, writable, inode))
         })
     }
-}
-
-pub fn open_file_at(fd: isize, name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
-    if let Some(dir) = get_dir(fd, name) {
-        let mut paths: Vec<&str> = name.split("/").collect();
-        let name = paths.pop().unwrap();
-        open_file(dir, name, flags)
-    } else {
-        None
-    }
-}
-
-pub fn mkdir_at(fd: isize, name: &str) -> isize {
-    if let Some(dir) = get_dir(fd, name) {
-        let mut paths: Vec<&str> = name.split("/").collect();
-        let name = paths.pop().unwrap();
-        dir.create(name, ATTRIBUTE_DIRECTORY);
-        0
-    } else {
-        return -1;
-    }
-}
-
-pub fn unlinkat(fd: isize, name: &str) -> isize {
-    if let Some(inode) = open_file_at(fd, name, OpenFlags::RDONLY) {
-        inode.delete()
-    } else {
-        -1
-    }
-}
-
-// 找到打开文件的父目录
-fn get_dir(fd: isize, name: &str) -> Option<Arc<VFile>> {
-    let process = current_process();
-    let inner = process.inner_exclusive_access();
-    let mut paths: Vec<&str> = name.split("/").collect();
-    paths.pop().unwrap();
-
-    let dir: Arc<VFile>;
-    if paths.len() > 0 && paths[0] == "" {
-        if let Some(tmp) = ROOT_INODE.find_vfile_bypath(paths.to_vec()) {
-            dir = tmp;
-        } else {
-            return None;
-        }
-    } else if fd == -100 {
-        // 相对于当前工作目录
-        let mut cwd = inner.cwd.split("/").collect::<Vec<_>>();
-
-        if paths.len() > 0 && paths[0] == ".." {
-            cwd.pop();
-        }
-        cwd.append(&mut paths);
-
-        if let Some(tmp) = ROOT_INODE.find_vfile_bypath(cwd.to_vec()) {
-            dir = tmp;
-        } else {
-            return None;
-        }
-    } else {
-        // 相对于 fd 的工作目录
-        if let Some(cwd) = inner.fd_table[fd as usize].clone() {
-            match cwd {
-                FileDescriptor::OSInode(osinode) => {
-                    if let Some(tmp) = osinode
-                        .inner
-                        .exclusive_access()
-                        .inode
-                        .find_vfile_bypath(paths.to_vec())
-                    {
-                        dir = tmp;
-                    } else {
-                        return None;
-                    }
-                }
-                _ => return None,
-            }
-        } else {
-            return None;
-        }
-    }
-    Some(dir)
-}
-
-// 第一个参数fd是常量AT_FDCWD时，则其后的第二个参数路径名是以当前工作目录为基址的；否则以fd指定的目录文件描述符为基址。
-pub fn openat(fd: isize, name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
-    if let Some(dir) = get_dir(fd, name) {
-        let mut paths: Vec<&str> = name.split("/").collect();
-        let name = paths.pop().unwrap();
-        open_file(dir, name, flags)
-    } else {
-        None
-    }
-}
-
-impl File for OSInode {
-    fn readable(&self) -> bool {
-        self.readable
-    }
-    fn writable(&self) -> bool {
-        self.writable
-    }
-    fn read(&self, mut buf: UserBuffer) -> usize {
-        let mut inner = self.inner.exclusive_access();
-        let mut total_read_size = 0usize;
-        for slice in buf.buffers.iter_mut() {
-            let read_size = inner.inode.read_at(inner.offset, *slice);
-            if read_size == 0 {
-                break;
-            }
-            inner.offset += read_size;
-            total_read_size += read_size;
-        }
-        total_read_size
-    }
-    fn write(&self, buf: UserBuffer) -> usize {
-        let mut inner = self.inner.exclusive_access();
-        let mut total_write_size = 0usize;
-        for slice in buf.buffers.iter() {
-            let write_size = inner.inode.write_at(inner.offset, *slice);
-            assert_eq!(write_size, slice.len());
-            inner.offset += write_size;
-            total_write_size += write_size;
-        }
-        drop(inner);
-        total_write_size
-    }
-}
-
-pub fn add_initproc_shell() {
-    extern "C" {
-        fn _num_app();
-    }
-    let num_app_ptr = _num_app as usize as *mut usize;
-    let app_start = unsafe { core::slice::from_raw_parts_mut(num_app_ptr.add(1), 3) };
-
-    if let Some(inode) = open_file(ROOT_INODE.clone(), "initproc", OpenFlags::CREATE) {
-        println!("Create initproc ");
-        let mut data: Vec<&'static mut [u8]> = Vec::new();
-        data.push(unsafe {
-            core::slice::from_raw_parts_mut(app_start[0] as *mut u8, app_start[1] - app_start[0])
-        });
-        println!("Start write initproc ");
-        inode.write(UserBuffer::new(data));
-        println!("initproc OK");
-    } else {
-        panic!("initproc create fail!");
-    }
-
-    if let Some(inode) = open_file(ROOT_INODE.clone(), "user_shell", OpenFlags::CREATE) {
-        println!("Create user_shell ");
-        let mut data: Vec<&'static mut [u8]> = Vec::new();
-        data.push(unsafe {
-            core::slice::from_raw_parts_mut(app_start[1] as *mut u8, app_start[2] - app_start[1])
-        });
-        println!("Start write user_shell ");
-        inode.write(UserBuffer::new(data));
-        println!("User_shell OK");
-    } else {
-        panic!("user_shell create fail!");
-    }
-
-    println!("Write apps(initproc & user_shell) to disk from mem");
 }

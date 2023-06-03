@@ -29,7 +29,6 @@ pub struct ProcessControlBlockInner {
     pub parent: Option<Weak<ProcessControlBlock>>,
     pub children: Vec<Arc<ProcessControlBlock>>,
     pub exit_code: i32,
-    // pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
     pub fd_table: Vec<Option<FileDescriptor>>,
     pub signals: SignalFlags,
     // 设置一个向量保存进程下所有线程的任务控制块
@@ -42,7 +41,8 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     // 条件变量
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
-    pub cwd: String,
+    pub work_path: WorkPath,
+    // pub cwd: String,
     // user_heap
     pub heap_base: VirtAddr,
     pub heap_end: VirtAddr,
@@ -56,6 +56,8 @@ impl ProcessControlBlockInner {
         self.memory_set.token()
     }
 
+    /// 查找空闲文件描述符下标
+    /// 从文件描述符表中 **由低到高** 查找空位，返回向量下标，没有空位则在最后插入一个空位
     pub fn alloc_fd(&mut self) -> usize {
         if let Some(fd) = (0..self.fd_table.len()).find(|fd| self.fd_table[*fd].is_none()) {
             fd
@@ -148,7 +150,8 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
-                    cwd: String::from("/"),
+                    //cwd: String::from("/"),
+                    work_path: WorkPath::new(),
                     heap_base: uheap_base.into(),
                     heap_end: uheap_base.into(),
                     mmap_area_base: MEMORY_MAP_BASE.into(),
@@ -262,7 +265,7 @@ impl ProcessControlBlock {
             }
         }
         // copy work path
-        let path = parent.cwd.clone();
+        let path = parent.work_path.clone();
         // create child process pcb
         let child = Arc::new(Self {
             pid,
@@ -280,7 +283,8 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
-                    cwd: path,
+                    work_path: path,
+                    // cwd: path,
                     heap_base: parent.heap_base,
                     heap_end: parent.heap_end,
                     mmap_area_base: parent.mmap_area_base,
@@ -321,5 +325,67 @@ impl ProcessControlBlock {
 
     pub fn getpid(&self) -> usize {
         self.pid.0
+    }
+}
+
+pub struct WorkPath {
+    pub path: Vec<String>,
+}
+
+impl WorkPath {
+    //只有init proc使用,其他线程 clone自父线程
+    pub fn new() -> Self {
+        Self {
+            path: vec![String::from("/")],
+        }
+    }
+
+    //依据输入的path更新路径
+    pub fn modify_path(&mut self, input_path: &str) {
+        #[inline]
+        fn split(work_path: &mut WorkPath, path: &str) -> Vec<String> {
+            let split_path: Vec<&str> = path.split('/').collect();
+            let mut vec = vec![];
+            for part_path in split_path {
+                match part_path {
+                    "" | "." => (),
+                    ".." => {
+                        work_path.path.pop();
+                    }
+                    part => vec.push(part.to_string()),
+                    _ => (),
+                }
+            }
+            vec
+        };
+        let path_vec = split(self, input_path);
+        if WorkPath::is_abs_path(input_path) {
+            //绝对路径补上根目录"/"
+            self.path = vec![String::from("/")];
+        }
+        //如果是绝对路径,当前path中只包含"/"
+        //如果是相对路径,当前path中为处理过.和..的path
+        //和split生成的路径合并得到新路径
+        self.path.extend_from_slice(&path_vec);
+    }
+
+    pub fn is_abs_path(path: &str) -> bool {
+        if path.contains("^/") {
+            true
+        } else {
+            false
+        }
+    }
+}
+
+use core::fmt::{Display, Formatter};
+
+impl Display for WorkPath {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        let mut path = String::new();
+        for path_part in self.path.iter() {
+            path.push_str(path_part.as_str());
+        }
+        write!(f, "{}", path)
     }
 }
