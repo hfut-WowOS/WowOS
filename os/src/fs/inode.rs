@@ -69,6 +69,7 @@ impl OSInode {
     }
 
     /// 用于从OSInode表示的文件中读取指定长度的数据，并将其存储在一个Vec<u8>中返回。
+    #[allow(unused)]
     pub fn read_vec(&self, offset: isize, len: usize) -> Vec<u8> {
         let mut inner = self.inner.lock();
         // 用于跟踪还需要读取的数据长度
@@ -102,6 +103,7 @@ impl OSInode {
         v
     }
 
+    #[allow(unused)]
     pub fn write_all(&self, str_vec: &Vec<u8>) -> usize {
         let mut inner = self.inner.lock();
         let mut remain = str_vec.len();
@@ -136,13 +138,13 @@ impl OSInode {
         let inner = self.inner.lock();
         inner.inode.file_size() as usize
     }
-
+    #[allow(unused)]
     pub fn set_head_cluster(&self, cluster: u32) {
         let inner = self.inner.lock();
         let vfile = &inner.inode;
         vfile.set_first_cluster(cluster);
     }
-
+    #[allow(unused)]
     pub fn get_head_cluster(&self) -> u32 {
         let inner = self.inner.lock();
         let vfile = &inner.inode;
