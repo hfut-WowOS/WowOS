@@ -32,6 +32,12 @@ impl File for UDP {
     fn readable(&self) -> bool {
         true
     }
+    fn available(&self) -> bool {
+        true
+    }
+    fn get_name(&self) -> &str {
+        "UDP"
+    }
 
     fn writable(&self) -> bool {
         true

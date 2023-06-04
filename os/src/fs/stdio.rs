@@ -10,6 +10,12 @@ impl File for Stdin {
     fn readable(&self) -> bool {
         true
     }
+    fn get_name(&self) -> &str {
+        "Stdin"
+    }
+    fn available(&self) -> bool {
+        true
+    }
     fn writable(&self) -> bool {
         false
     }
@@ -28,6 +34,12 @@ impl File for Stdin {
 }
 
 impl File for Stdout {
+    fn available(&self) -> bool {
+        true
+    }
+    fn get_name(&self) -> &str {
+        "Stdout"
+    }
     fn readable(&self) -> bool {
         false
     }

@@ -170,4 +170,12 @@ impl File for Pipe {
             }
         }
     }
+
+    fn get_name(&self) -> &str {
+        "pipe"
+    }
+    fn available(&self) -> bool {
+        true
+    }
+
 }

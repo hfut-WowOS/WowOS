@@ -42,6 +42,12 @@ impl File for TCP {
     fn readable(&self) -> bool {
         true
     }
+    fn available(&self) -> bool {
+        true
+    }
+    fn get_name(&self) -> &str {
+        "TCP"
+    }
 
     fn writable(&self) -> bool {
         true

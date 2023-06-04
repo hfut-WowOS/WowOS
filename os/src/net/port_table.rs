@@ -126,6 +126,12 @@ impl File for PortFd {
     fn readable(&self) -> bool {
         false
     }
+    fn available(&self) -> bool {
+        true
+    }
+    fn get_name(&self) -> &str {
+        "PortFd"
+    }
 
     fn writable(&self) -> bool {
         false

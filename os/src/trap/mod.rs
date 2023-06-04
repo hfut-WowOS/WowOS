@@ -11,7 +11,7 @@ use core::arch::{asm, global_asm};
 use riscv::register::{
     mtvec::TrapMode,
     scause::{self, Exception, Interrupt, Trap},
-    sie, sip, sscratch, sstatus, stval, stvec,
+    sie, sscratch, sstatus, stval, stvec,
 };
 
 global_asm!(include_str!("trap.S"));
@@ -71,7 +71,7 @@ pub fn trap_handler() -> ! {
             enable_supervisor_interrupt();
 
             // get system call return value
-            let result = syscall(cx.x[17], [cx.x[10], cx.x[11], cx.x[12]]);
+            let result = syscall(cx.x[17], [cx.x[10], cx.x[11], cx.x[12], cx.x[13], cx.x[14], cx.x[15]]);
             // cx is changed during sys_exec, so we have to call it again
             cx = current_trap_cx();
             cx.x[10] = result as usize;

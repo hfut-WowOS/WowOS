@@ -32,6 +32,9 @@ pub struct ProcessControlBlockInner {
     pub mutex_list: Vec<Option<Arc<dyn Mutex>>>,
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+
+    // 工作目录
+    pub work_path: String,
 }
 
 impl ProcessControlBlockInner {
@@ -99,6 +102,8 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    // 初始进程的工作目录当然是/了
+                    work_path: String::from("/"),
                 })
             },
         });
@@ -218,6 +223,8 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    // fork出的子进程的工作目录和父进程相同
+                    work_path: parent.work_path.clone(),
                 })
             },
         });
