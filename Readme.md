@@ -1,8 +1,7 @@
 <div align='center'>
     <h1>Welcome to WowOS!</h1>
-    <br>
     <picture>
-        <img alt="NexT preview" src="docs/figures/WowOS.png">
+        <img alt="NexT preview" src="docs/figures/WowOS.png" width = "50%">
     </picture>
     <div>
         <a href='#'>English</a> |
