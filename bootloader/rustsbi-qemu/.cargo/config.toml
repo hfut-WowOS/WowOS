@@ -1,0 +1,16 @@
+[alias]
+xtask = "run --package xtask --release --"
+make = "xtask make"
+asm = "xtask asm"
+qemu = "xtask qemu"
+
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source."git+https://github.com/rustsbi/sbi-testing?rev=7a5e920"]
+git = "https://github.com/rustsbi/sbi-testing"
+rev = "7a5e920"
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "vendor"

@@ -1,0 +1,3 @@
+[workspace]
+members = ["rustsbi-qemu", "hsm-cell", "xtask"]
+default-members = ["xtask"]
