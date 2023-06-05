@@ -1,6 +1,5 @@
-
-const SYSCALL_GETCWD:   usize = 17; // new
-const SYSCALL_DUP:     usize = 23;
+const SYSCALL_GETCWD: usize = 17; // new
+const SYSCALL_DUP: usize = 23;
 const SYSCALL_DUP3: usize = 24; // new
 const SYSCALL_CONNECT: usize = 29;
 const SYSCALL_LISTEN: usize = 30;
@@ -10,6 +9,7 @@ const SYSCALL_UNLINKAT: usize = 35; // new
 const SYSCALL_UMOUNT2: usize = 39; // new
 const SYSCALL_MOUNT: usize = 40; // new
 const SYSCALL_STATFS: usize = 43; // new
+const SYSCALL_CHDIR: usize = 49; // new
 const SYSCALL_OPEN: usize = 56;
 const SYSCALL_CLOSE: usize = 57;
 const SYSCALL_PIPE: usize = 59;
@@ -62,9 +62,9 @@ use thread::*;
 
 pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
     match syscall_id {
-        SYSCALL_GETCWD =>   sys_getcwd(args[0] as *mut u8, args[1]),
+        SYSCALL_GETCWD => sys_getcwd(args[0] as *mut u8, args[1]),
         SYSCALL_DUP => sys_dup(args[0]),
-        SYSCALL_DUP3 =>     sys_dup3(args[0], args[1]),
+        SYSCALL_DUP3 => sys_dup3(args[0], args[1]),
         SYSCALL_CONNECT => sys_connect(args[0] as _, args[1] as _, args[2] as _),
         SYSCALL_LISTEN => sys_listen(args[0] as _),
         SYSCALL_ACCEPT => sys_accept(args[0] as _),
@@ -79,6 +79,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 6]) -> isize {
             args[4] as *const u8,
         ),
         SYSCALL_STATFS => sys_statfs(args[0] as *const u8, args[1] as *const u8),
+        SYSCALL_CHDIR => sys_chdir(args[0] as *const u8),
         SYSCALL_OPEN => sys_openat(
             args[0] as isize,
             args[1] as *const u8,
