@@ -32,6 +32,7 @@ use crate::drivers::chardev::CharDevice;
 use crate::drivers::chardev::UART;
 
 core::arch::global_asm!(include_str!("entry.asm"));
+core::arch::global_asm!(include_str!("start_app.asm"));
 
 fn clear_bss() {
     extern "C" {

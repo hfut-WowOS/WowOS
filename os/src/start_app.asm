@@ -17,7 +17,7 @@ _app_names:
     .global app_0_end
     .align 3
 app_0_start:
-    .incbin "../user/target/riscv64gc-unknown-none-elf/release/initproc"
+    .incbin "./start_apps/initproc"
 app_0_end:
 
     .section .data
@@ -25,5 +25,5 @@ app_0_end:
     .global app_1_end
     .align 3
 app_1_start:
-    .incbin "../user/target/riscv64gc-unknown-none-elf/release/user_shell"
+    .incbin "./start_apps/user_shell"
 app_1_end:
