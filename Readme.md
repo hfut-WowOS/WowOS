@@ -30,5 +30,6 @@ make run
 ## run in docker
 
 ```shell
+docker pull alphamj/os-contest:v7.5
 docker run --rm -it -v .:/code --entrypoint bash alphamj/os-contest:v7.3
 ```
