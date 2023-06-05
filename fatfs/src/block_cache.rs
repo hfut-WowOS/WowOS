@@ -150,12 +150,6 @@ lazy_static! {
     pub static ref BLOCK_CACHE_MANAGER: RwLock<BlockCacheManager> = RwLock::new(BlockCacheManager::new(64));
 }
 
-// 定义了两个静态的可变变量 CACHEGET_NUM 和 CACHEHIT_NUM，用于计算缓存的命中率。
-#[cfg(feature = "calc_hit_rate")]
-pub static mut CACHEGET_NUM: f64 = 0.0;
-#[cfg(feature = "calc_hit_rate")]
-pub static mut CACHEHIT_NUM: f64 = 0.0;
-
 /// 用于外部模块访问文件数据块
 pub fn get_block_cache(block_id: usize, block_device: Arc<dyn BlockDevice>) -> Arc<RwLock<BlockCache>> {
     // 这里的read是RWLock读写锁
