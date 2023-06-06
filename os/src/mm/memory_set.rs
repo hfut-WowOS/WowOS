@@ -1,8 +1,9 @@
-use super::{frame_alloc, FrameTracker};
+use super::{frame_alloc, translated_byte_buffer, FrameTracker, UserBuffer};
 use super::{PTEFlags, PageTable, PageTableEntry};
 use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
 use super::{StepByOne, VPNRange};
-use crate::config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE};
+use crate::config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, USER_STACK_BASE};
+use crate::fs::File;
 use crate::sync::UPIntrFreeCell;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
@@ -36,6 +37,8 @@ pub fn kernel_token() -> usize {
 pub struct MemorySet {
     page_table: PageTable,
     areas: Vec<MapArea>,
+    heap: BTreeMap<VirtPageNum, FrameTracker>, // user heap
+    mmap_areas: Vec<MemoryMapArea>,
 }
 
 impl MemorySet {
@@ -43,6 +46,8 @@ impl MemorySet {
         Self {
             page_table: PageTable::new(),
             areas: Vec::new(),
+            heap: BTreeMap::new(),
+            mmap_areas: Vec::new(),
         }
     }
     pub fn token(&self) -> usize {
@@ -168,7 +173,7 @@ impl MemorySet {
     }
     /// Include sections in elf and trampoline,
     /// also returns user_sp_base and entry point.
-    pub fn from_elf(elf_data: &[u8]) -> (Self, usize, usize) {
+    pub fn from_elf(elf_data: &[u8]) -> (Self, usize, usize, usize) {
         let mut memory_set = Self::new_bare();
         // map trampoline
         memory_set.map_trampoline();
@@ -204,11 +209,19 @@ impl MemorySet {
             }
         }
         let max_end_va: VirtAddr = max_end_vpn.into();
-        let mut user_stack_base: usize = max_end_va.into();
-        user_stack_base += PAGE_SIZE;
+        // let mut user_stack_base: usize = max_end_va.into();
+        // user_stack_base += PAGE_SIZE;
+        // (
+        //     memory_set,
+        //     user_stack_base,
+        //     elf.header.pt2.entry_point() as usize,
+        // )
+        let mut user_heap_base: usize = max_end_va.into();
+        user_heap_base += PAGE_SIZE;
         (
             memory_set,
-            user_stack_base,
+            user_heap_base,
+            USER_STACK_BASE,
             elf.header.pt2.entry_point() as usize,
         )
     }
@@ -244,6 +257,51 @@ impl MemorySet {
     pub fn recycle_data_pages(&mut self) {
         //*self = Self::new_bare();
         self.areas.clear();
+    }
+
+    pub fn insert_mmap_area(&mut self, mmap_area: MemoryMapArea) {
+        self.mmap_areas.push(mmap_area);
+    }
+
+    pub fn remove_mmap_area(&mut self, start_vpn: VirtPageNum) -> bool {
+        if let Some((idx, area)) = self
+            .mmap_areas
+            .iter_mut()
+            .enumerate()
+            .find(|(_, area)| area.vpn_range.get_start() == start_vpn)
+        {
+            area.unmap(&mut self.page_table);
+            self.mmap_areas.remove(idx);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn lazy_alloc_heap(&mut self, va: VirtAddr) -> bool {
+        let vpn: VirtPageNum = va.floor();
+        let frame = frame_alloc().unwrap();
+        let ppn = frame.ppn;
+        self.page_table
+            .map(vpn, ppn, PTEFlags::U | PTEFlags::R | PTEFlags::W);
+        self.heap.insert(vpn, frame);
+        true
+    }
+
+    pub fn lazy_alloc_mmap_area(
+        &mut self,
+        va: VirtAddr,
+        fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
+    ) -> bool {
+        let vpn: VirtPageNum = va.floor();
+        if let Some(area) = self
+            .mmap_areas
+            .iter_mut()
+            .find(|area| area.vpn_range.contain(vpn))
+        {
+            return area.map_one(&mut self.page_table, vpn, fd_table);
+        }
+        false
     }
 }
 
@@ -377,4 +435,74 @@ pub fn remap_test() {
         .unwrap()
         .executable(),);
     println!("remap_test passed!");
+}
+
+pub struct MemoryMapArea {
+    pub vpn_range: VPNRange,
+    data_frames: BTreeMap<VirtPageNum, FrameTracker>,
+    map_perm: MapPermission,
+    fd: usize,
+    offset: usize,
+    flags: usize,
+}
+
+impl MemoryMapArea {
+    pub fn new(
+        start_va: VirtAddr,
+        end_va: VirtAddr,
+        map_perm: MapPermission,
+        fd: usize,
+        offset: usize,
+        flags: usize,
+    ) -> Self {
+        let start_vpn: VirtPageNum = start_va.floor();
+        let end_vpn: VirtPageNum = end_va.ceil();
+        Self {
+            vpn_range: VPNRange::new(start_vpn, end_vpn),
+            data_frames: BTreeMap::new(),
+            map_perm,
+            fd,
+            offset,
+            flags,
+        }
+    }
+
+    pub fn map_one(
+        &mut self,
+        page_table: &mut PageTable,
+        vpn: VirtPageNum,
+        fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
+    ) -> bool {
+        // 分配物理页
+        let ppn: PhysPageNum;
+        let frame = frame_alloc().unwrap();
+        ppn = frame.ppn;
+        self.data_frames.insert(vpn, frame);
+        let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
+        page_table.map(vpn, ppn, pte_flags);
+
+        // 复制文件数据到内存
+        if let Some(file_descriptor) = &fd_table[self.fd] {
+            if file_descriptor.readable() {
+                let va: usize = VirtAddr::from(vpn).into();
+                let mmap_base: usize = VirtAddr::from(self.vpn_range.get_start()).into();
+                let page_offset = va - mmap_base + self.offset;
+                let buf = translated_byte_buffer(page_table.token(), va as *const u8, PAGE_SIZE);
+                file_descriptor.set_offset(page_offset);
+                file_descriptor.read(UserBuffer::new(buf));
+                return true;
+            } else {
+                return false;
+            }
+        }
+        false
+    }
+
+    pub fn unmap(&mut self, page_table: &mut PageTable) {
+        for vpn in self.vpn_range {
+            self.data_frames.remove(&vpn);
+            // sys_mmap采取lazy策略, sys_munmap时可能未分配内存, 因此不能unmap
+            // page_table.unmap(vpn);
+        }
+    }
 }

@@ -1,10 +1,13 @@
 use super::id::RecycleAllocator;
 use super::manager::insert_into_pid2process;
-use super::TaskControlBlock;
+use super::{TaskControlBlock, current_process};
 use super::{add_task, SignalFlags};
 use super::{pid_alloc, PidHandle};
+use crate::config::MEMORY_MAP_BASE;
 use crate::fs::{File, Stdin, Stdout};
-use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE};
+use crate::mm::{
+    translated_refmut, MapPermission, MemoryMapArea, MemorySet, VirtAddr, VirtPageNum, KERNEL_SPACE,
+};
 use crate::sync::{Condvar, Mutex, Semaphore, UPIntrFreeCell, UPIntrRefMut};
 use crate::trap::{trap_handler, TrapContext};
 use alloc::string::String;
@@ -21,11 +24,12 @@ pub struct ProcessControlBlock {
 
 pub struct ProcessControlBlockInner {
     pub is_zombie: bool,
-    pub memory_set: MemorySet,
+    pub memory_set: MemorySet, //应用地址空间
     pub parent: Option<Weak<ProcessControlBlock>>,
     pub children: Vec<Arc<ProcessControlBlock>>,
     pub exit_code: i32,
     pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
+    /// 文件描述符表
     pub signals: SignalFlags,
     pub tasks: Vec<Option<Arc<TaskControlBlock>>>,
     pub task_res_allocator: RecycleAllocator,
@@ -35,6 +39,12 @@ pub struct ProcessControlBlockInner {
 
     // 工作目录
     pub work_path: String,
+
+    // user_heap
+    pub heap_base: VirtAddr,
+    pub heap_end: VirtAddr,
+    pub mmap_area_base: VirtAddr,
+    pub mmap_area_end: VirtAddr,
 }
 
 impl ProcessControlBlockInner {
@@ -42,7 +52,8 @@ impl ProcessControlBlockInner {
     pub fn get_user_token(&self) -> usize {
         self.memory_set.token()
     }
-
+    /// ### 查找空闲文件描述符下标
+    /// 从文件描述符表中 **由低到高** 查找空位，返回向量下标，没有空位则在最后插入一个空位
     pub fn alloc_fd(&mut self) -> usize {
         if let Some(fd) = (0..self.fd_table.len()).find(|fd| self.fd_table[*fd].is_none()) {
             fd
@@ -50,6 +61,14 @@ impl ProcessControlBlockInner {
             self.fd_table.push(None);
             self.fd_table.len() - 1
         }
+    }
+
+    // alloc a specific new_fd
+    pub fn alloc_specific_fd(&mut self, new_fd: usize) -> usize {
+        for _ in self.fd_table.len()..=new_fd {
+            self.fd_table.push(None);
+        }
+        new_fd
     }
 
     pub fn alloc_tid(&mut self) -> usize {
@@ -67,6 +86,31 @@ impl ProcessControlBlockInner {
     pub fn get_task(&self, tid: usize) -> Arc<TaskControlBlock> {
         self.tasks[tid].as_ref().unwrap().clone()
     }
+
+    pub fn mmap(
+        &mut self,
+        start: usize,
+        len: usize,
+        prot: usize,
+        flags: usize,
+        fd: usize,
+        offset: usize,
+    ) {
+        let start_va = start.into();
+        let end_va = (start + len).into();
+        // 测例prot定义与MapPermission正好差一位
+        let map_perm = MapPermission::from_bits((prot << 1) as u8).unwrap() | MapPermission::U;
+
+        self.memory_set.insert_mmap_area(MemoryMapArea::new(
+            start_va, end_va, map_perm, fd, offset, flags,
+        ));
+        self.mmap_area_end = end_va;
+    }
+
+    pub fn munmap(&mut self, start: usize, len: usize) -> bool {
+        let start_vpn = VirtPageNum::from(VirtAddr::from(start));
+        self.memory_set.remove_mmap_area(start_vpn)
+    }
 }
 
 impl ProcessControlBlock {
@@ -74,9 +118,10 @@ impl ProcessControlBlock {
         self.inner.exclusive_access()
     }
 
+    //只有init proc调用,其他的线程从fork产生
     pub fn new(elf_data: &[u8]) -> Arc<Self> {
         // memory_set with elf program headers/trampoline/trap context/user stack
-        let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
+        let (memory_set, uheap_base, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
         // allocate a pid
         let pid_handle = pid_alloc();
         let process = Arc::new(Self {
@@ -104,6 +149,10 @@ impl ProcessControlBlock {
                     condvar_list: Vec::new(),
                     // 初始进程的工作目录当然是/了
                     work_path: String::from("/"),
+                    heap_base: uheap_base.into(),
+                    heap_end: uheap_base.into(),
+                    mmap_area_base: MEMORY_MAP_BASE.into(),
+                    mmap_area_end: MEMORY_MAP_BASE.into(),
                 })
             },
         });
@@ -140,10 +189,16 @@ impl ProcessControlBlock {
     pub fn exec(self: &Arc<Self>, elf_data: &[u8], args: Vec<String>) {
         assert_eq!(self.inner_exclusive_access().thread_count(), 1);
         // memory_set with elf program headers/trampoline/trap context/user stack
-        let (memory_set, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
+        let (memory_set, uheap_base, ustack_base, entry_point) = MemorySet::from_elf(elf_data);
         let new_token = memory_set.token();
         // substitute memory_set
         self.inner_exclusive_access().memory_set = memory_set;
+        // 重新设置堆大小
+        self.inner.exclusive_access().heap_base = uheap_base.into();
+        self.inner.exclusive_access().heap_end = uheap_base.into();
+        // 重新设置mmap_area
+        self.inner.exclusive_access().mmap_area_base = MEMORY_MAP_BASE.into();
+        self.inner.exclusive_access().mmap_area_end = MEMORY_MAP_BASE.into();
         // then we alloc user resource for main thread again
         // since memory_set has been changed
         let task = self.inner_exclusive_access().get_task(0);
@@ -225,6 +280,10 @@ impl ProcessControlBlock {
                     condvar_list: Vec::new(),
                     // fork出的子进程的工作目录和父进程相同
                     work_path: parent.work_path.clone(),
+                    heap_base: parent.heap_base,
+                    heap_end: parent.heap_end,
+                    mmap_area_base: parent.mmap_area_base,
+                    mmap_area_end: parent.mmap_area_end,
                 })
             },
         });
@@ -261,5 +320,26 @@ impl ProcessControlBlock {
 
     pub fn getpid(&self) -> usize {
         self.pid.0
+    }
+}
+
+
+pub fn lazy_check(addr: usize) -> bool {
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
+    let fd_table = inner.fd_table.clone();
+
+    let va = addr.into();
+    let heap_base = inner.heap_base.0;
+    let heap_end = inner.heap_end.0;
+    let mmap_area_base = inner.mmap_area_base.0;
+    let mmap_area_end = inner.mmap_area_end.0;
+
+    if heap_base <= addr && addr < heap_end {
+        inner.memory_set.lazy_alloc_heap(va)
+    } else if mmap_area_base <= addr && addr < mmap_area_end  {
+        inner.memory_set.lazy_alloc_mmap_area(va, fd_table)
+    } else {
+        false
     }
 }

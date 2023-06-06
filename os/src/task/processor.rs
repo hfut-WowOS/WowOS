@@ -68,6 +68,7 @@ pub fn current_process() -> Arc<ProcessControlBlock> {
     current_task().unwrap().process.upgrade().unwrap()
 }
 
+/// 从全局变量 `PROCESSOR` 中取出当前正在执行任务的用户地址空间 token
 pub fn current_user_token() -> usize {
     let task = current_task().unwrap();
     task.get_user_token()

@@ -137,6 +137,12 @@ impl PageTable {
     }
 }
 
+/// ### 以向量的形式返回一组可以在内存空间中直接访问的字节数组切片
+/// |参数|描述|
+/// |--|--|
+/// |`token`|某个应用地址空间的 token|
+/// |`ptr`|应用地址空间中的一段缓冲区的起始地址
+/// |`len`|应用地址空间中的一段缓冲区的长度
 pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&'static mut [u8]> {
     let page_table = PageTable::from_token(token);
     let mut start = ptr as usize;
@@ -210,22 +216,29 @@ impl UserBuffer {
         }
         total
     }
-    // 将一个Buffer的数据写入UserBuffer，返回写入长度
-    pub fn write(&mut self, buff: &[u8]) -> usize {
-        let len = self.len().min(buff.len());
-        let mut current = 0;
-        for sub_buff in self.buffers.iter_mut() {
-            let sblen = (*sub_buff).len();
-            for j in 0..sblen {
-                (*sub_buff)[j] = buff[current];
-                current += 1;
-                if current == len {
-                    return len;
-                }
+     /// 将一个Buffer的数据写入UserBuffer，返回写入长度
+     pub fn write(&mut self, buf: &[u8]) -> usize {
+        assert!(self.buffers.len() >= 1);
+        let len = self.len().min(buf.len());
+        let mut write_len = 0;
+        for buffer in self.buffers.iter_mut() {
+            //当前写入的终点
+            let write_end = len.min(write_len + buffer.len());
+
+            //取部分保证两个slice等长
+            let copied_part = &buf[write_len..write_end];
+            let copy_part = &mut buffer[..(write_end - write_len)];
+            copy_part.copy_from_slice(copied_part);
+    
+            //写入完成
+            if write_end == len {
+                break;
             }
+            write_len += buffer.len();
         }
-        return len;
+        len
     }
+    
     pub fn write_at(&mut self, offset: usize, buff: &[u8]) -> isize {
         let len = buff.len();
         if offset + len > self.len() {
@@ -239,7 +252,7 @@ impl UserBuffer {
             if head + sblen < offset {
                 head += sblen;
                 continue;
-            } else if head < offset { 
+            } else if head < offset {
                 for j in (offset - head)..sblen {
                     (*sub_buff)[j] = buff[current];
                     current += 1;

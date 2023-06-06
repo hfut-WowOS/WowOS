@@ -218,6 +218,9 @@ where
     pub fn get_end(&self) -> T {
         self.r
     }
+    pub fn contain(&self, t: T) -> bool {
+        self.l <= t && t < self.r
+    }
 }
 impl<T> IntoIterator for SimpleRange<T>
 where
@@ -260,3 +263,7 @@ where
     }
 }
 pub type VPNRange = SimpleRange<VirtPageNum>;
+
+pub fn align_up(addr: usize) -> usize {
+    ((addr) + PAGE_SIZE - 1) & (!(PAGE_SIZE - 1))
+}

@@ -507,3 +507,14 @@ pub fn sys_fstat(fd: isize, buf: *mut u8) -> isize {
         -1
     }
 }
+// // to do
+// #[allow(unused)]
+// pub fn sys_linkat(
+//     _oldfd: isize, 
+//     _oldpath: *const u8, 
+//     _newfd: isize, 
+//     _newpath: *const u8, 
+//     _flags: u32
+// ) ->  isize {
+//     0
+// }

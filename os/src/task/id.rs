@@ -8,6 +8,7 @@ use alloc::{
 };
 use lazy_static::*;
 
+// 通用资源分配器
 pub struct RecycleAllocator {
     current: usize,
     recycled: Vec<usize>,
@@ -20,6 +21,7 @@ impl RecycleAllocator {
             recycled: Vec::new(),
         }
     }
+    // 分配一个描述符
     pub fn alloc(&mut self) -> usize {
         if let Some(id) = self.recycled.pop() {
             id
@@ -28,6 +30,7 @@ impl RecycleAllocator {
             self.current - 1
         }
     }
+    // 回收一个描述符
     pub fn dealloc(&mut self, id: usize) {
         assert!(id < self.current);
         assert!(
@@ -40,20 +43,27 @@ impl RecycleAllocator {
 }
 
 lazy_static! {
+    // PID 的全局分配器 PID_ALLOCATOR
     static ref PID_ALLOCATOR: UPIntrFreeCell<RecycleAllocator> =
         unsafe { UPIntrFreeCell::new(RecycleAllocator::new()) };
+
+    // 用于对内核栈标识符进行分配
     static ref KSTACK_ALLOCATOR: UPIntrFreeCell<RecycleAllocator> =
         unsafe { UPIntrFreeCell::new(RecycleAllocator::new()) };
 }
 
 pub const IDLE_PID: usize = 0;
 
+// 进程描述符：PID
 pub struct PidHandle(pub usize);
 
+// 分配一个 PID
+// 调用 pid_alloc 可以从全局 PID 分配器中分配一个 PID 并构成一个 RAII 风格的 PidHandle
 pub fn pid_alloc() -> PidHandle {
     PidHandle(PID_ALLOCATOR.exclusive_access().alloc())
 }
 
+// 当 PidHandle 被回收的时候则会自动调用 drop 方法在全局 PID 分配器将对应的 PID 回收
 impl Drop for PidHandle {
     fn drop(&mut self) {
         PID_ALLOCATOR.exclusive_access().dealloc(self.0);
@@ -61,12 +71,14 @@ impl Drop for PidHandle {
 }
 
 /// Return (bottom, top) of a kernel stack in kernel space.
+/// 计算出内核栈在内核地址空间中的位置
 pub fn kernel_stack_position(kstack_id: usize) -> (usize, usize) {
     let top = TRAMPOLINE - kstack_id * (KERNEL_STACK_SIZE + PAGE_SIZE);
     let bottom = top - KERNEL_STACK_SIZE;
     (bottom, top)
 }
 
+// 线程独占的内核栈
 pub struct KernelStack(pub usize);
 
 pub fn kstack_alloc() -> KernelStack {
@@ -110,16 +122,19 @@ impl KernelStack {
     }
 }
 
+// 线程独占的线程资源组
 pub struct TaskUserRes {
-    pub tid: usize,
-    pub ustack_base: usize,
-    pub process: Weak<ProcessControlBlock>,
+    pub tid: usize,                         // 进程分配的 TID
+    pub ustack_base: usize,                 // 用来计算线程用户栈位置
+    pub process: Weak<ProcessControlBlock>, // 所属进程的弱引用（需要进程控制块来完成实际的资源分配和回收）
 }
 
+// 计算出线程在所属进程地址空间内的 Trap 上下文的位置
 fn trap_cx_bottom_from_tid(tid: usize) -> usize {
     TRAP_CONTEXT_BASE - tid * PAGE_SIZE
 }
 
+// 计算出线程在所属进程地址空间内的用户栈位置
 fn ustack_bottom_from_tid(ustack_base: usize, tid: usize) -> usize {
     ustack_base + tid * (PAGE_SIZE + USER_STACK_SIZE)
 }
@@ -136,12 +151,16 @@ impl TaskUserRes {
             ustack_base,
             process: Arc::downgrade(&process),
         };
+        // 如果为假，就不必再分配一次用户栈和 Trap 上下文
+        // 即在 fork 子进程并创建子进程的主线程的时候
+        // 因为子进程拷贝了父进程的地址空间，这些内容已经被映射过了
         if alloc_user_res {
             task_user_res.alloc_user_res();
         }
         task_user_res
     }
 
+    /// 在进程地址空间中实际映射线程的用户栈和 Trap 上下文。
     pub fn alloc_user_res(&self) {
         let process = self.process.upgrade().unwrap();
         let mut process_inner = process.inner_exclusive_access();
@@ -163,6 +182,8 @@ impl TaskUserRes {
         );
     }
 
+    // 当线程退出之后， TaskUserRes 会随着线程控制块一起被回收
+    // 意味着进程分配给它的资源也会被回收
     fn dealloc_user_res(&self) {
         // dealloc tid
         let process = self.process.upgrade().unwrap();

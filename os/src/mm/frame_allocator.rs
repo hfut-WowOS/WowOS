@@ -144,6 +144,10 @@ pub fn frame_allocator_test() {
     println!("frame_allocator_test passed!");
 }
 
+pub fn add_free(ppn: usize) {
+    FRAME_ALLOCATOR.exclusive_access().recycled.push(ppn)
+}
+
 #[allow(unused)]
 pub fn frame_allocator_alloc_more_test() {
     let mut v: Vec<FrameTracker> = Vec::new();
