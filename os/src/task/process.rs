@@ -1,16 +1,18 @@
+use core::fmt::{Display, Formatter};
+
 use super::id::RecycleAllocator;
 use super::manager::insert_into_pid2process;
-use super::{TaskControlBlock, current_process};
 use super::{add_task, SignalFlags};
+use super::{current_process, TaskControlBlock};
 use super::{pid_alloc, PidHandle};
 use crate::config::MEMORY_MAP_BASE;
-use crate::fs::{File, Stdin, Stdout};
+use crate::fs::{FileDescriptor, Stdin, Stdout};
 use crate::mm::{
     translated_refmut, MapPermission, MemoryMapArea, MemorySet, VirtAddr, VirtPageNum, KERNEL_SPACE,
 };
 use crate::sync::{Condvar, Mutex, Semaphore, UPIntrFreeCell, UPIntrRefMut};
 use crate::trap::{trap_handler, TrapContext};
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -28,7 +30,7 @@ pub struct ProcessControlBlockInner {
     pub parent: Option<Weak<ProcessControlBlock>>,
     pub children: Vec<Arc<ProcessControlBlock>>,
     pub exit_code: i32,
-    pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
+    pub fd_table: Vec<Option<FileDescriptor>>,
     /// 文件描述符表
     pub signals: SignalFlags,
     pub tasks: Vec<Option<Arc<TaskControlBlock>>>,
@@ -38,7 +40,7 @@ pub struct ProcessControlBlockInner {
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
 
     // 工作目录
-    pub work_path: String,
+    pub work_path: WorkPath,
 
     // user_heap
     pub heap_base: VirtAddr,
@@ -64,6 +66,7 @@ impl ProcessControlBlockInner {
     }
 
     // alloc a specific new_fd
+    #[allow(unused)]
     pub fn alloc_specific_fd(&mut self, new_fd: usize) -> usize {
         for _ in self.fd_table.len()..=new_fd {
             self.fd_table.push(None);
@@ -135,11 +138,11 @@ impl ProcessControlBlock {
                     exit_code: 0,
                     fd_table: vec![
                         // 0 -> stdin
-                        Some(Arc::new(Stdin)),
+                        Some(FileDescriptor::Abstract(Arc::new(Stdin))),
                         // 1 -> stdout
-                        Some(Arc::new(Stdout)),
+                        Some(FileDescriptor::Abstract(Arc::new(Stdout))),
                         // 2 -> stderr
-                        Some(Arc::new(Stdout)),
+                        Some(FileDescriptor::Abstract(Arc::new(Stdout))),
                     ],
                     signals: SignalFlags::empty(),
                     tasks: Vec::new(),
@@ -148,7 +151,7 @@ impl ProcessControlBlock {
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
                     // 初始进程的工作目录当然是/了
-                    work_path: String::from("/"),
+                    work_path: WorkPath::new(),
                     heap_base: uheap_base.into(),
                     heap_end: uheap_base.into(),
                     mmap_area_base: MEMORY_MAP_BASE.into(),
@@ -253,7 +256,8 @@ impl ProcessControlBlock {
         // alloc a pid
         let pid = pid_alloc();
         // copy fd table
-        let mut new_fd_table: Vec<Option<Arc<dyn File + Send + Sync>>> = Vec::new();
+        // copy fd table
+        let mut new_fd_table: Vec<Option<FileDescriptor>> = Vec::new();
         for fd in parent.fd_table.iter() {
             if let Some(file) = fd {
                 new_fd_table.push(Some(file.clone()));
@@ -323,7 +327,6 @@ impl ProcessControlBlock {
     }
 }
 
-
 pub fn lazy_check(addr: usize) -> bool {
     let process = current_process();
     let mut inner = process.inner_exclusive_access();
@@ -337,9 +340,74 @@ pub fn lazy_check(addr: usize) -> bool {
 
     if heap_base <= addr && addr < heap_end {
         inner.memory_set.lazy_alloc_heap(va)
-    } else if mmap_area_base <= addr && addr < mmap_area_end  {
+    } else if mmap_area_base <= addr && addr < mmap_area_end {
         inner.memory_set.lazy_alloc_mmap_area(va, fd_table)
     } else {
         false
+    }
+}
+
+//当前工作目录
+//以目录或者文件为单位分割,便于相对路径的修改
+//绝对路径
+//相对路径 (处理. 和 ..)
+#[derive(Clone)]
+pub struct WorkPath {
+    pub path: Vec<String>,
+}
+
+impl WorkPath {
+    //只有init proc使用,其他线程 clone自父线程
+    pub fn new() -> Self {
+        Self {
+            path: vec![String::from("/")],
+        }
+    }
+
+    //依据输入的path更新路径
+    pub fn modify_path(&mut self, input_path: &str) {
+        #[inline]
+        fn split(work_path: &mut WorkPath, path: &str) -> Vec<String> {
+            let split_path: Vec<&str> = path.split('/').collect();
+            let mut vec = vec![];
+            for part_path in split_path {
+                match part_path {
+                    "" | "." => (),
+                    ".." => {
+                        work_path.path.pop();
+                    }
+                    part => vec.push(part.to_string()),
+                    _ => (),
+                }
+            }
+            vec
+        };
+        let path_vec = split(self, input_path);
+        if WorkPath::is_abs_path(input_path) {
+            //绝对路径补上根目录"/"
+            self.path = vec![String::from("/")];
+        }
+        //如果是绝对路径,当前path中只包含"/"
+        //如果是相对路径,当前path中为处理过.和..的path
+        //和split生成的路径合并得到新路径
+        self.path.extend_from_slice(&path_vec);
+    }
+
+    pub fn is_abs_path(path: &str) -> bool {
+        if path.contains("^/") {
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl Display for WorkPath {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
+        let mut path = String::new();
+        for path_part in self.path.iter() {
+            path.push_str(path_part.as_str());
+        }
+        write!(f, "{}", path)
     }
 }

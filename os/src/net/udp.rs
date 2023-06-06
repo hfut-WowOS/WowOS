@@ -1,3 +1,5 @@
+#[allow(unused)]
+
 use super::net_interrupt_handler;
 use super::socket::{add_socket, pop_data, remove_socket};
 use super::LOSE_NET_STACK;
@@ -31,12 +33,6 @@ impl UDP {
 impl File for UDP {
     fn readable(&self) -> bool {
         true
-    }
-    fn available(&self) -> bool {
-        true
-    }
-    fn get_name(&self) -> &str {
-        "UDP"
     }
 
     fn writable(&self) -> bool {

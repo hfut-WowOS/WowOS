@@ -1,8 +1,8 @@
-use crate::fs::{open, OpenFlags};
+use crate::fs::{OpenFlags, open_file, FileType};
 use crate::mm::{translated_ref, translated_refmut, translated_str, align_up, translated_byte_buffer, UserBuffer};
 use crate::task::*;
 use crate::timer::get_time_ms;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
@@ -100,11 +100,13 @@ pub fn sys_execve(path: *const u8, mut args: *const usize) -> isize {
     //获取当前工作目录
     let work_path = current_process()
         .inner_exclusive_access()
-        .work_path.clone();
-    if let Some(app_inode) = open(
+        .work_path
+        .to_string();
+    if let Some(app_inode) = open_file(
         &work_path,
         path.as_str(),
         OpenFlags::O_RDONLY,
+        FileType::Regular,
     ) {
         let all_data = app_inode.read_all();
         let process = current_process();
@@ -133,7 +135,7 @@ pub fn sys_exec(path: *const u8, mut args: *const usize) -> isize {
             args = args.add(1);
         }
     }
-    if let Some(app_inode) = open("/", path.as_str(), OpenFlags::O_RDONLY) {
+    if let Some(app_inode) = open_file("/", path.as_str(), OpenFlags::O_RDONLY, FileType::Regular) {
         let all_data = app_inode.read_all();
         let process = current_process();
         let argc = args_vec.len();
@@ -257,7 +259,7 @@ pub fn sys_brk(addr: usize) -> isize {
 }
 
 pub fn sys_mmap(
-    start: usize,
+    _start: usize,
     len: usize,
     prot: usize,
     flags: usize,
@@ -319,6 +321,7 @@ pub fn sys_uname(buf:*const u8) -> isize{
     0   
 }
 
+#[allow(unused)]
 pub fn sys_linkat(
     _oldfd: isize, 
     _oldpath: *const u8, 

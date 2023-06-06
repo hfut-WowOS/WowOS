@@ -144,6 +144,7 @@ pub fn frame_allocator_test() {
     println!("frame_allocator_test passed!");
 }
 
+#[allow(unused)]
 pub fn add_free(ppn: usize) {
     FRAME_ALLOCATOR.exclusive_access().recycled.push(ppn)
 }

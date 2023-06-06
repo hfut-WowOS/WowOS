@@ -1,3 +1,6 @@
+#[allow(unused)]
+
+
 use alloc::{sync::Arc, vec::Vec};
 use lazy_static::lazy_static;
 use lose_net_stack::packets::tcp::TCPPacket;
@@ -101,7 +104,7 @@ pub fn accept_connection(_port: u16, tcp_packet: &TCPPacket, task: Arc<TaskContr
         tcp_packet.ack,
     );
 
-    inner.fd_table[fd] = Some(Arc::new(tcp_socket));
+    //inner.fd_table[fd] = Some(Arc::new(tcp_socket));
 
     let cx = task.inner_exclusive_access().get_trap_cx();
     cx.x[10] = fd;
@@ -125,12 +128,6 @@ impl Drop for PortFd {
 impl File for PortFd {
     fn readable(&self) -> bool {
         false
-    }
-    fn available(&self) -> bool {
-        true
-    }
-    fn get_name(&self) -> &str {
-        "PortFd"
     }
 
     fn writable(&self) -> bool {

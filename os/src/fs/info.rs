@@ -7,75 +7,148 @@
 /// 用于存储目录中的文件信息，包括文件的索引节点号、偏移量、长度、类型和文件名。
 /// as_bytes方法提供了将结构体转换为字节数组的功能，方便在操作系统中进行数据传输和存储。
 ///
-use core::mem::size_of;
+use core::slice::from_raw_parts;
 
-pub const S_IFMT: u32 = 0o170000; //bit mask for the file type bit field
-pub const S_IFSOCK: u32 = 0o140000; //socket
-pub const S_IFLNK: u32 = 0o120000; //symbolic link
-pub const S_IFREG: u32 = 0o100000; //regular file
-pub const S_IFBLK: u32 = 0o060000; //block device
-pub const S_IFDIR: u32 = 0o040000; //directory
-pub const S_IFCHR: u32 = 0o020000; //character device
-pub const S_IFIFO: u32 = 0o010000; //FIFO
+use fatfs::BLOCK_SZ;
 
-pub const S_ISUID: u32 = 0o4000; //set-user-ID bit (see execve(2))
-pub const S_ISGID: u32 = 0o2000; //set-group-ID bit (see below)
-pub const S_ISVTX: u32 = 0o1000; //sticky bit (see below)
+pub const DTYPE_DIR: u8 = 4;
+pub const DTYPE_REG: u8 = 8;
+pub const DTYPE_UNKNOWN: u8 = 0;
 
-pub const S_IRWXU: u32 = 0o0700; //owner has read, write, and execute permission
-pub const S_IRUSR: u32 = 0o0400; //owner has read permission
-pub const S_IWUSR: u32 = 0o0200; //owner has write permission
-pub const S_IXUSR: u32 = 0o0100; //owner has execute permission
-
-pub const S_IRWXG: u32 = 0o0070; //group has read, write, and execute permission
-pub const S_IRGRP: u32 = 0o0040; //group has read permission
-pub const S_IWGRP: u32 = 0o0020; //group has write permission
-pub const S_IXGRP: u32 = 0o0010; //group has execute permission
-
-pub const S_IRWXO: u32 = 0o0007; //others (not in group) have read, write,and execute permission
-pub const S_IROTH: u32 = 0o0004; //others have read permission
-pub const S_IWOTH: u32 = 0o0002; //others have write permission
-pub const S_IXOTH: u32 = 0o0001; //others have execute permission
-
-/// Kstat结构体用于表示文件的状态信息，包括设备ID、索引节点号、文件类型和模式、硬链接数、所有者的用户ID和组ID、
-/// 设备ID（如果是特殊文件）、文件大小、文件系统I/O的块大小、分配的块数、上次访问时间、上次修改时间、上次状态变化时间等。
-#[derive(Debug)]
 #[repr(C)]
-pub struct Kstat {
-    st_dev: u64,   // 包含文件的设备 ID
-    st_ino: u64,   // 索引节点号
-    st_mode: u32,  // 文件类型和模式
-    st_nlink: u32, // 硬链接数
-    st_uid: u32,   // 所有者的用户 ID
-    st_gid: u32,   // 所有者的组 ID
-    st_rdev: u64,  // 设备 ID（如果是特殊文件）
-    __pad: u64,
-    st_size: i64,    // 总大小，以字节为单位
-    st_blksize: i32, // 文件系统 I/O 的块大小
-    __pad2: i32,
-    st_blocks: u64,     // 分配的 512B 块数
-    st_atime_sec: i64,  // 上次访问时间
-    st_atime_nsec: i64, // 上次访问时间（纳秒精度）
-    st_mtime_sec: i64,  // 上次修改时间
-    st_mtime_nsec: i64, // 上次修改时间（纳秒精度）
-    st_ctime_sec: i64,  // 上次状态变化的时间
-    st_ctime_nsec: i64, // 上次状态变化的时间（纳秒精度）
-    __unused: [u32; 2],
+pub struct Dirent {
+    d_ino: u64,
+    offset: i64,
+    dirent_len: u16,
+    d_type: u8,
+    d_name: [u8; 128],
 }
 
-impl Kstat {
-    pub fn new() -> Self {
+impl Dirent {
+    pub fn default() -> Self {
+        Self {
+            d_ino: 0,
+            offset: 0,
+            dirent_len: 0,
+            d_type: 0,
+            d_name: [0; 128],
+        }
+    }
+
+    pub fn new(name: &str, inode_id: u64, offset: i64, dirent_len: u16, d_type: u8) -> Self {
+        Self {
+            d_ino: inode_id,
+            offset,
+            dirent_len,
+            d_type,
+            d_name: Dirent::str2bytes(name),
+        }
+    }
+
+    pub fn fill_info(&mut self, name: &str, inode: u64, offset: i64, dirent_len: u16, d_type: u8) {
+        *self = Self {
+            d_ino: inode,
+            offset,
+            dirent_len,
+            d_type,
+            d_name: Self::str2bytes(name),
+        };
+    }
+
+    fn str2bytes(str: &str) -> [u8; 128] {
+        let bytes = str.as_bytes();
+        let len = bytes.len();
+        assert!(len <= 128);
+        let mut buf = [0u8; 128];
+        let copy_part = &mut buf[..len];
+        copy_part.copy_from_slice(bytes);
+        buf
+    }
+    
+    pub fn as_bytes(&self) -> &[u8] {
+        let size = core::mem::size_of::<Dirent>();
+        unsafe { from_raw_parts(self as *const _ as *const u8, size) }
+    }
+}
+
+bitflags! {
+    pub struct VFSFlag:u32{
+        //file type mask
+        const S_IFMT    = 0170_000; /*mask*/
+
+        const S_IFSOCK  = 0140_000; /*socket file*/
+        const S_IFLNK   = 0120_000; /*link file*/
+        const S_IFREG   = 0100_000; /*regular file*/
+        const S_IFBLK   = 0060_000; /*block device*/
+        const S_IFDIR   = 0040_000; /*directory*/
+        const S_IFCHR   = 0020_000; /*char device*/
+        const S_IFIFO   = 0010_000; /*fifo*/
+
+        //file mode mask
+        const S_ISUID   = 04000; /*set uid*/
+        const S_ISGID   = 02000; /*set gid*/
+        const S_ISVTX   = 01000; /*stick bit*/
+
+        //use
+        const S_IRWXU   = 00700; /*read write execute*/
+        const S_IRUSR   = 00400; /*read*/
+        const S_IWUSR   = 00200; /*write*/
+        const S_IXUSR   = 00100; /*exec*/
+
+        //group
+        const S_IRWXG   = 00070; /**/
+        const S_IRGRP   = 00040;
+        const S_IWGRP   = 00020;
+        const S_IXGRP   = 00010;
+    }
+}
+
+impl VFSFlag {
+    pub fn create_flag(file_type: VFSFlag, user_perm: VFSFlag, group_perm: VFSFlag) -> Self {
+        unsafe { VFSFlag::from_bits_unchecked((file_type | user_perm | group_perm).bits) }
+    }
+}
+
+#[repr(C)]
+pub struct Kstat {
+    st_dev: u64,
+    /* ID of device containing file */
+    st_ino: u64,
+    /* Inode number */
+    st_mode: u32,
+    /* File type and mode */
+    st_nlink: u32,
+    /* Number of hard links */
+    st_uid: u32,
+    st_gid: u32,
+    st_rdev: u64,
+    __pad: u64,
+    st_size: u32,
+    st_blksize: u32,
+    __pad2: i32,
+    st_blocks: u64,
+    st_atime_sec: i64,
+    st_atime_nsec: i64,
+    st_mtime_sec: i64,
+    st_mtime_nsec: i64,
+    st_ctime_sec: i64,
+    st_ctime_nsec: i64,
+}
+
+impl Default for Kstat {
+    fn default() -> Self {
+        let flags = VFSFlag::create_flag(VFSFlag::S_IFREG, VFSFlag::S_IRWXU, VFSFlag::S_IRWXG);
         Self {
             st_dev: 0,
             st_ino: 0,
-            st_mode: 0,
-            st_nlink: 0,
+            st_mode: flags.bits,
+            st_nlink: 1,
             st_uid: 0,
             st_gid: 0,
             st_rdev: 0,
             __pad: 0,
             st_size: 0,
-            st_blksize: 0,
+            st_blksize: BLOCK_SZ as u32,
             __pad2: 0,
             st_blocks: 0,
             st_atime_sec: 0,
@@ -84,109 +157,33 @@ impl Kstat {
             st_mtime_nsec: 0,
             st_ctime_sec: 0,
             st_ctime_nsec: 0,
-            __unused: [0; 2],
         }
     }
+}
 
-    pub fn init(&mut self, st_size: i64, st_blksize: i32, st_blocks: u64, st_mode: u32, time: u64) {
-        self.st_nlink = 1;
-        self.st_size = st_size;
-        self.st_blksize = st_blksize;
-        self.st_blocks = st_blocks;
-        self.st_mode = st_mode;
-        _ = time;
+impl Kstat {
+    pub fn update(
+        &mut self,
+        st_ino: u64,
+        st_mode: u32,
+        st_size: u32,
+        access_time: i64,
+        modify_time: i64,
+        create_time: i64,
+    ) {
+        *self = Kstat {
+            st_ino,
+            st_mode,
+            st_size,
+            st_atime_sec: access_time,
+            st_mtime_sec: modify_time,
+            st_ctime_sec: create_time,
+            ..*self
+        }
     }
-
+    
     pub fn as_bytes(&self) -> &[u8] {
         let size = core::mem::size_of::<Self>();
-        unsafe { core::slice::from_raw_parts(self as *const _ as usize as *const u8, size) }
+        unsafe { core::slice::from_raw_parts(self as *const Self as *const u8, size) }
     }
 }
-
-#[repr(C)]
-pub struct Statfs {
-    f_type: u64,
-    f_bsize: u64,
-    f_blocks: u64,
-    f_bfree: u64,
-    f_bavail: u64,
-    f_files: u64,
-    f_ffree: u64,
-    f_fsid: u64,
-    f_namelen: u64,
-    f_frsize: u64,
-    f_flag: u64,
-    f_spare: [u64; 4],
-}
-
-impl Statfs {
-    pub fn new() -> Self {
-        Self {
-            f_type:1,
-            f_bsize: 512,
-            f_blocks: 12345,
-            f_bfree: 1234,
-            f_bavail: 123,
-            f_files: 1000,
-            f_ffree: 100,
-            f_fsid: 1,
-            f_namelen: 123,
-            f_frsize: 4096,
-            f_flag: 123,
-            f_spare: [0; 4],
-        }
-    }
-    pub fn as_bytes(&self) -> &[u8] {
-        let size = core::mem::size_of::<Self>();
-        unsafe { core::slice::from_raw_parts(self as *const _ as usize as *const u8, size) }
-    }
-}
-
-
-
-/// 存储目录中的文件信息
-pub const NAME_LIMIT: usize = 64;
-
-/// 存储目录中的文件信息
-#[repr(C)]
-#[derive(Debug)]
-pub struct Dirent {
-    d_ino: usize,             // 索引节点号
-    d_off: isize,             // 从 0 开始到下一个 dirent 的偏移
-    d_reclen: u16,            // 当前 dirent 的长度
-    d_type: u8,               // 文件类型
-    d_name: [u8; NAME_LIMIT], // 文件名
-}
-
-impl Dirent {
-    pub fn new() -> Self {
-        Self {
-            d_ino: 0,
-            d_off: 0,
-            d_reclen: core::mem::size_of::<Self>() as u16,
-            d_type: 0,
-            d_name: [0; NAME_LIMIT],
-        }
-    }
-
-    pub fn init(&mut self, name: &str, offset: isize, first_clu: usize) {
-        self.d_ino = first_clu;
-        self.d_off = offset;
-        self.fill_name(name);
-    }
-
-    fn fill_name(&mut self, name: &str) {
-        let len = name.len().min(NAME_LIMIT);
-        let name_bytes = name.as_bytes();
-        for i in 0..len {
-            self.d_name[i] = name_bytes[i];
-        }
-        self.d_name[len] = 0;
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        let size = core::mem::size_of::<Self>();
-        unsafe { core::slice::from_raw_parts(self as *const _ as usize as *const u8, size) }
-    }
-}
-

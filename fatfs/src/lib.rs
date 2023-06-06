@@ -1,25 +1,31 @@
 #![no_std]
 extern crate alloc;
 
-mod block_cache;
+
 mod block_dev;
-mod fat32_manager;
 mod layout;
+mod fat32_manager;
 mod vfs;
-
-
-pub const BLOCK_SIZE: usize = 512;
+mod block_cache;
+pub const BLOCK_SZ:usize = 512;
 pub use block_dev::BlockDevice;
+pub use vfs::VFile;
 pub use layout::ShortDirEntry;
-pub use vfs::{VFile,create_root_vfile};
-use block_cache::{get_block_cache, set_start_sec, write_to_dev};
+//pub use layout::NAME_LENGTH_LIMIT;
 pub use fat32_manager::FAT32Manager;
 pub use layout::*;
+use block_cache::{get_block_cache,get_info_cache,write_to_dev,set_start_sec, CacheMode};
+/*
+pub trait w_field {
+    fn set(&self, value:Self);
+}
 
-#[cfg(feature = "calc_hit_rate")]
-pub use block_cache::{CACHEGET_NUM,CACHEHIT_NUM};
+impl w_field for u32 {
+    fn set(&mut self, value:Self){
+        *self = Self
+    }
+}*/
 
-/// 用于将一个切片克隆为指定类型的数组。它接受一个切片和目标数组类型作为参数，并返回克隆后的数组。
 pub fn clone_into_array<A, T>(slice: &[T]) -> A
 where
     A: Default + AsMut<[T]>,

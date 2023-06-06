@@ -1,3 +1,6 @@
+#[allow(unused)]
+
+
 use alloc::vec;
 use lose_net_stack::packets::tcp::TCPPacket;
 use lose_net_stack::IPv4;
@@ -41,12 +44,6 @@ impl TCP {
 impl File for TCP {
     fn readable(&self) -> bool {
         true
-    }
-    fn available(&self) -> bool {
-        true
-    }
-    fn get_name(&self) -> &str {
-        "TCP"
     }
 
     fn writable(&self) -> bool {
